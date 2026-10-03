@@ -149,7 +149,7 @@ public sealed class IssueRepository(string projectRoot)
                 throw new IssueException($"Issue '{issue.Id}' changed since it was read while the update was being prepared. Reload it and retry.");
             }
 
-            WriteAtomically(path, content, overwrite: true);
+            WriteAtomically(path, content, overwrite: true, expectedRevision);
         }
 
         return Read(issue.Id);
@@ -632,7 +632,7 @@ public sealed class IssueRepository(string projectRoot)
         }
     }
 
-    private static void WriteAtomically(string path, string content, bool overwrite)
+    private void WriteAtomically(string path, string content, bool overwrite, string? expectedRevision = null)
     {
         var directory = Path.GetDirectoryName(path)!;
         var tempPath = Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
@@ -643,6 +643,16 @@ public sealed class IssueRepository(string projectRoot)
             {
                 stream.Write(bytes);
                 stream.Flush(flushToDisk: true);
+            }
+
+            if (expectedRevision is not null)
+            {
+                ProjectLocator.RejectLink(path);
+                if (!File.Exists(path) ||
+                    !string.Equals(ReadPath(path).Revision, expectedRevision, StringComparison.Ordinal))
+                {
+                    throw new IssueException("The issue changed since it was read; the update was not written.");
+                }
             }
 
             File.Move(tempPath, path, overwrite);
