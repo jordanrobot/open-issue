@@ -1,0 +1,17 @@
+---
+schema: 1
+id: 00000000-0000-4000-8000-000000000303
+title: Linked fixture
+status: open
+ready: false
+priority: low
+tags: []
+created_at: "2026-10-03T20:00:00.0000000+00:00"
+updated_at: "2026-10-03T20:00:00.0000000+00:00"
+parent: 00000000-0000-4000-8000-000000000301
+related:
+- 00000000-0000-4000-8000-000000000301
+blocks:
+- 00000000-0000-4000-8000-000000000301
+---
+Linked issue fixture.

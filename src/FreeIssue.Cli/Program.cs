@@ -71,6 +71,42 @@ internal static class FreeIssueCommand
             values.Add(args[++index]);
         }
 
+        var allowedOptions = command switch
+        {
+            "init" => new[] { "path" },
+            "new" => new[] { "title", "body", "body-file", "priority", "tag" },
+            "list" or "search" => new[] { "status", "tag", "priority", "ready" },
+            "show" or "next" or "close" or "decline" or "reopen" or "ready" or "unready" or "help" => [],
+            "edit" => new[] { "title", "body", "body-file", "status", "ready", "priority", "tag", "parent", "related", "blocks" },
+            _ => []
+        };
+        var unknownOption = options.Keys.FirstOrDefault(name => !allowedOptions.Contains(name, StringComparer.OrdinalIgnoreCase));
+        if (unknownOption is not null)
+        {
+            return Fail($"Unknown option '--{unknownOption}' for '{command}'.", json);
+        }
+
+        if (command is "init" or "list" or "next" or "help" && positional.Count != 0)
+        {
+            return Fail($"Unexpected argument '{positional[0]}' for '{command}'.", json);
+        }
+
+        if (command == "new" && positional.Count != 0)
+        {
+            return Fail($"Unexpected argument '{positional[0]}' for '{command}'.", json);
+        }
+
+        if (command is "show" or "edit" or "close" or "decline" or "reopen" or "ready" or "unready" &&
+            positional.Count != 1)
+        {
+            return Fail($"'{command}' requires exactly one issue ID.", json);
+        }
+
+        if (command == "search" && positional.Count == 0)
+        {
+            return Fail("search requires a query.", json);
+        }
+
         if (command == "init")
         {
             try
@@ -155,7 +191,9 @@ internal static class FreeIssueCommand
                         options.ContainsKey("tag") ? Options(options, "tag") : null,
                         Option(options, "parent"),
                         options.ContainsKey("related") ? SplitIds(Options(options, "related")) : null,
-                        options.ContainsKey("blocks") ? SplitIds(Options(options, "blocks")) : null);
+                        options.ContainsKey("blocks") ? SplitIds(Options(options, "blocks")) : null,
+                        ParseEnumOption<IssueStatus>(Option(options, "status")),
+                        ParseBoolean(Option(options, "ready")));
                     PrintIssue(issue, json);
                     return 0;
                 }
@@ -187,9 +225,10 @@ internal static class FreeIssueCommand
                     }
 
                     var results = service.Search(query, filter);
+                    var diagnostics = service.List(filter).Diagnostics;
                     if (json)
                     {
-                        Console.WriteLine(JsonSerializer.Serialize(results, JsonOptions));
+                        Console.WriteLine(JsonSerializer.Serialize(new { issues = results, diagnostics }, JsonOptions));
                     }
                     else
                     {
@@ -197,6 +236,8 @@ internal static class FreeIssueCommand
                         {
                             Console.WriteLine($"{issue.Id[..8]}  {issue.Title}");
                         }
+
+                        PrintDiagnostics(diagnostics);
                     }
 
                     return 0;
@@ -237,6 +278,12 @@ internal static class FreeIssueCommand
         IReadOnlyDictionary<string, List<string>> options,
         bool json)
     {
+        if (options.ContainsKey("body-file") && options.ContainsKey("body"))
+        {
+            Fail("Specify only one of --body and --body-file.", json);
+            return null;
+        }
+
         if (options.TryGetValue("body-file", out var files))
         {
             if (files.Count != 1)
@@ -332,7 +379,8 @@ internal static class FreeIssueCommand
 
     private static T? ParseEnumOption<T>(string? value) where T : struct, Enum =>
         value is null ? null :
-            Enum.TryParse<T>(value, ignoreCase: true, out var parsed) && Enum.IsDefined(parsed)
+            Enum.GetNames<T>().Any(name => string.Equals(name, value, StringComparison.OrdinalIgnoreCase)) &&
+            Enum.TryParse<T>(value, ignoreCase: true, out var parsed)
                 ? parsed
                 : throw new IssueException($"Unsupported {typeof(T).Name.ToLowerInvariant()} '{value}'.");
 
@@ -395,7 +443,8 @@ internal static class FreeIssueCommand
         }
 
         return message.Contains("changed since it was read", StringComparison.OrdinalIgnoreCase) ? 3 :
-            message.Contains("not found", StringComparison.OrdinalIgnoreCase) ? 1 : 2;
+            message.Contains("not found", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("No issue matches", StringComparison.OrdinalIgnoreCase) ? 1 : 2;
     }
 
     private static void PrintHelp()
@@ -408,10 +457,10 @@ internal static class FreeIssueCommand
               free-issue new --title TITLE (--body TEXT | --body-file FILE) [--priority VALUE] [--tag TAG]
               free-issue list [--status VALUE] [--tag TAG] [--priority VALUE] [--ready true|false] [--json]
               free-issue show ID [--json]
-              free-issue edit ID [--title TITLE] [--body-file FILE] [--priority VALUE] [--tag TAG] [--parent ID|none] [--related ID,...] [--blocks ID,...]
+              free-issue edit ID [--title TITLE] [--body-file FILE] [--status VALUE] [--ready true|false] [--priority VALUE] [--tag TAG] [--parent ID|none] [--related ID,...] [--blocks ID,...]
               free-issue close|decline|reopen ID
               free-issue ready|unready ID
-              free-issue search QUERY [--json]
+              free-issue search QUERY [--status VALUE] [--tag TAG] [--priority VALUE] [--ready true|false] [--json]
               free-issue next [--json]
               free-issue help
 

@@ -72,7 +72,9 @@ public sealed class IssueService(IssueRepository repository)
         IEnumerable<string>? tags = null,
         string? parent = null,
         IEnumerable<string>? related = null,
-        IEnumerable<string>? blocks = null)
+        IEnumerable<string>? blocks = null,
+        IssueStatus? status = null,
+        bool? ready = null)
     {
         var current = Resolve(idOrPrefix);
         if (title is not null)
@@ -108,6 +110,21 @@ public sealed class IssueService(IssueRepository repository)
         if (blocks is not null)
         {
             current.Blocks = blocks.Select(reference => Resolve(reference).Id).ToList();
+        }
+
+        if (status is not null)
+        {
+            current.Status = status.Value;
+        }
+
+        if (ready is not null)
+        {
+            current.Ready = ready.Value;
+        }
+
+        if (current.Status != IssueStatus.Open)
+        {
+            current.Ready = false;
         }
 
         current.UpdatedAt = DateTimeOffset.UtcNow;

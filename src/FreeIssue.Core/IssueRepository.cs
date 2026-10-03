@@ -17,6 +17,7 @@ public sealed class IssueRepository(string projectRoot)
     {
         var issues = new List<Issue>();
         var diagnostics = new List<IssueDiagnostic>();
+        EnsureSafeDirectory();
         if (!Directory.Exists(_issuesDirectory))
         {
             return new IssueListResult(issues, diagnostics);
@@ -41,6 +42,30 @@ public sealed class IssueRepository(string projectRoot)
             {
                 diagnostics.Add(new IssueDiagnostic(path, exception.Message));
             }
+        }
+
+        var knownIds = issues.Select(issue => issue.Id).ToHashSet(StringComparer.Ordinal);
+        foreach (var issue in issues)
+        {
+            foreach (var reference in References(issue))
+            {
+                if (!knownIds.Contains(reference))
+                {
+                    diagnostics.Add(new IssueDiagnostic(GetIssuePath(issue.Id),
+                        $"Referenced issue '{reference}' does not exist."));
+                }
+            }
+        }
+
+        var byId = issues.ToDictionary(issue => issue.Id, StringComparer.Ordinal);
+        foreach (var cycleId in FindCycleIds(byId, issue => issue.Parent is null ? [] : [issue.Parent]))
+        {
+            diagnostics.Add(new IssueDiagnostic(GetIssuePath(cycleId), "Parent relationships contain a cycle."));
+        }
+
+        foreach (var cycleId in FindCycleIds(byId, issue => issue.Blocks))
+        {
+            diagnostics.Add(new IssueDiagnostic(GetIssuePath(cycleId), "Blocking relationships contain a cycle."));
         }
 
         return new IssueListResult(issues, diagnostics);
@@ -69,6 +94,7 @@ public sealed class IssueRepository(string projectRoot)
         ValidateId(issue.Id);
         ValidateIssue(issue);
         ValidateReferences(issue, []);
+        EnsureSafeDirectory();
         var path = GetIssuePath(issue.Id);
         using (AcquireLock(issue.Id))
         {
@@ -87,6 +113,7 @@ public sealed class IssueRepository(string projectRoot)
     {
         ValidateId(issue.Id);
         ValidateIssue(issue);
+        EnsureSafeDirectory();
         var path = GetIssuePath(issue.Id);
         using (AcquireLock(issue.Id))
         {
@@ -102,11 +129,27 @@ public sealed class IssueRepository(string projectRoot)
                 throw new IssueException($"Issue '{issue.Id}' changed since it was read. Reload it and retry.");
             }
 
-            var all = List().Issues.Where(existing => existing.Id != issue.Id).ToList();
-            ValidateReferences(issue, all);
+            var relationshipsChanged = current.Parent != issue.Parent ||
+                                       !current.Related.SequenceEqual(issue.Related, StringComparer.Ordinal) ||
+                                       !current.Blocks.SequenceEqual(issue.Blocks, StringComparer.Ordinal);
+            using var relationshipLock = relationshipsChanged ? AcquireRelationshipLock() : null;
+            if (relationshipsChanged)
+            {
+                var all = List().Issues.Where(existing => existing.Id != issue.Id).ToList();
+                ValidateReferences(issue, all);
+            }
+
+            issue.CreatedAt = current.CreatedAt;
+            issue.UpdatedAt = DateTimeOffset.UtcNow;
             issue.Frontmatter = current.Frontmatter;
             issue.LineEnding = current.LineEnding;
-            WriteAtomically(path, Serialize(issue), overwrite: true);
+            var content = Serialize(issue);
+            if (!string.Equals(ReadPath(path).Revision, expectedRevision, StringComparison.Ordinal))
+            {
+                throw new IssueException($"Issue '{issue.Id}' changed since it was read while the update was being prepared. Reload it and retry.");
+            }
+
+            WriteAtomically(path, content, overwrite: true);
         }
 
         return Read(issue.Id);
@@ -115,7 +158,16 @@ public sealed class IssueRepository(string projectRoot)
     public string GetIssuePath(string id)
     {
         ValidateId(id);
+        EnsureSafeDirectory();
         return Path.Combine(_issuesDirectory, id + ".md");
+    }
+
+    private void EnsureSafeDirectory()
+    {
+        if (!string.Equals(ProjectLocator.GetIssuesDirectory(ProjectRoot), _issuesDirectory, StringComparison.Ordinal))
+        {
+            throw new IssueException("The issue directory changed unexpectedly.");
+        }
     }
 
     private Issue ReadPath(string path)
@@ -130,15 +182,21 @@ public sealed class IssueRepository(string projectRoot)
             throw new IssueException($"Issue file is not valid UTF-8: {exception.Message}");
         }
 
+        var revision = Convert.ToHexString(SHA256.HashData(Utf8.GetBytes(raw))).ToLowerInvariant();
+        if (raw.StartsWith('\uFEFF'))
+        {
+            raw = raw[1..];
+        }
+
         var firstNewline = raw.IndexOf('\n');
-        if (!raw.StartsWith("---", StringComparison.Ordinal) || firstNewline < 0)
+        if (firstNewline < 0 ||
+            !raw.AsSpan(0, firstNewline).TrimEnd('\r').SequenceEqual("---"))
         {
             throw new IssueException("Expected YAML frontmatter beginning with '---'.");
         }
 
         var lineEnding = firstNewline > 0 && raw[firstNewline - 1] == '\r' ? "\r\n" : "\n";
         var contentStart = firstNewline + 1;
-        var closeStart = -1;
         var cursor = contentStart;
         while (cursor <= raw.Length)
         {
@@ -151,11 +209,10 @@ public sealed class IssueRepository(string projectRoot)
             var lineEnd = end > cursor && raw[end - 1] == '\r' ? end - 1 : end;
             if (raw.AsSpan(cursor, lineEnd - cursor).SequenceEqual("---"))
             {
-                closeStart = cursor;
                 var bodyStart = end < raw.Length ? end + 1 : end;
                 var frontmatterText = raw[contentStart..(cursor > 0 && raw[cursor - 1] == '\r' ? cursor - 1 : cursor)];
                 var body = raw[bodyStart..];
-                return ParseFrontmatter(frontmatterText, body, lineEnding, raw);
+                return ParseFrontmatter(frontmatterText, body, lineEnding, revision);
             }
 
             if (end == raw.Length)
@@ -166,11 +223,10 @@ public sealed class IssueRepository(string projectRoot)
             cursor = end + 1;
         }
 
-        _ = closeStart;
         throw new IssueException("Expected a closing '---' after YAML frontmatter.");
     }
 
-    private static Issue ParseFrontmatter(string text, string body, string lineEnding, string raw)
+    private static Issue ParseFrontmatter(string text, string body, string lineEnding, string revision)
     {
         try
         {
@@ -232,7 +288,7 @@ public sealed class IssueRepository(string projectRoot)
                 Related = related,
                 Blocks = blocks,
                 Body = body,
-                Revision = Convert.ToHexString(SHA256.HashData(Utf8.GetBytes(raw))).ToLowerInvariant(),
+                Revision = revision,
                 Frontmatter = map,
                 LineEnding = lineEnding
             };
@@ -267,8 +323,11 @@ public sealed class IssueRepository(string projectRoot)
 
         using var writer = new StringWriter(CultureInfo.InvariantCulture);
         new YamlStream(new YamlDocument(map)).Save(writer, assignAnchors: false);
-        var metadata = writer.ToString().TrimEnd('\r', '\n');
-        return "---" + issue.LineEnding + metadata.Replace("\n", issue.LineEnding, StringComparison.Ordinal) +
+        var metadata = writer.ToString().TrimEnd('\r', '\n')
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Replace("\n", issue.LineEnding, StringComparison.Ordinal);
+        return "---" + issue.LineEnding + metadata +
                issue.LineEnding + "---" + issue.LineEnding + issue.Body;
     }
 
@@ -315,10 +374,20 @@ public sealed class IssueRepository(string projectRoot)
             ? value
             : throw new IssueException($"Frontmatter field '{key}' must be true or false.");
 
-    private static DateTimeOffset ReadDate(IReadOnlyDictionary<string, YamlNode> values, string key) =>
-        DateTimeOffset.TryParse(ReadString(values, key), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var value)
-            ? value.ToUniversalTime()
-            : throw new IssueException($"Frontmatter field '{key}' must be an ISO 8601 timestamp.");
+    private static DateTimeOffset ReadDate(IReadOnlyDictionary<string, YamlNode> values, string key)
+    {
+        var text = ReadString(values, key);
+        if (System.Text.RegularExpressions.Regex.IsMatch(text,
+                @"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|\+00:00)$",
+                System.Text.RegularExpressions.RegexOptions.CultureInvariant) &&
+            DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var value) &&
+            value.Offset == TimeSpan.Zero)
+        {
+            return value.ToUniversalTime();
+        }
+
+        throw new IssueException($"Frontmatter field '{key}' must be a UTC ISO 8601 timestamp.");
+    }
 
     private static List<string> ReadStringList(IReadOnlyDictionary<string, YamlNode> values, string key) =>
         !values.TryGetValue(key, out var node) || node is not YamlSequenceNode sequence
@@ -331,7 +400,8 @@ public sealed class IssueRepository(string projectRoot)
         values.ContainsKey(key) ? ReadStringList(values, key) : [];
 
     private static T ParseEnum<T>(string value, string key) where T : struct, Enum =>
-        Enum.TryParse<T>(value, ignoreCase: true, out var parsed) && Enum.IsDefined(parsed)
+        Enum.GetNames<T>().Any(name => string.Equals(name, value, StringComparison.OrdinalIgnoreCase)) &&
+        Enum.TryParse<T>(value, ignoreCase: true, out var parsed)
             ? parsed
             : throw new IssueException($"Frontmatter field '{key}' has unsupported value '{value}'.");
 
@@ -346,6 +416,11 @@ public sealed class IssueRepository(string projectRoot)
 
     private static void ValidateIssue(Issue issue)
     {
+        if (!Enum.IsDefined(issue.Status) || !Enum.IsDefined(issue.Priority))
+        {
+            throw new IssueException("Issue status or priority is invalid.");
+        }
+
         if (string.IsNullOrWhiteSpace(issue.Title))
         {
             throw new IssueException("Issue title cannot be empty.");
@@ -462,6 +537,47 @@ public sealed class IssueRepository(string projectRoot)
         }
     }
 
+    private static HashSet<string> FindCycleIds(
+        IReadOnlyDictionary<string, Issue> issues,
+        Func<Issue, IEnumerable<string>> next)
+    {
+        var cycles = new HashSet<string>(StringComparer.Ordinal);
+        var complete = new HashSet<string>(StringComparer.Ordinal);
+        var stack = new List<string>();
+        void Visit(string id)
+        {
+            var cycleIndex = stack.IndexOf(id);
+            if (cycleIndex >= 0)
+            {
+                cycles.UnionWith(stack.Skip(cycleIndex));
+                return;
+            }
+
+            if (!complete.Add(id))
+            {
+                return;
+            }
+
+            stack.Add(id);
+            foreach (var neighbor in next(issues[id]).Where(issues.ContainsKey))
+            {
+                Visit(neighbor);
+            }
+
+            stack.RemoveAt(stack.Count - 1);
+        }
+
+        foreach (var id in issues.Keys)
+        {
+            Visit(id);
+        }
+
+        return cycles;
+    }
+
+    private static IEnumerable<string> References(Issue issue) =>
+        issue.Related.Concat(issue.Blocks).Concat(issue.Parent is null ? [] : [issue.Parent]);
+
     private FileStream AcquireLock(string id)
     {
         var lockPath = Path.Combine(_issuesDirectory, $".{id}.lock");
@@ -485,6 +601,33 @@ public sealed class IssueRepository(string projectRoot)
             if (DateTime.UtcNow >= deadline)
             {
                 throw new IssueException($"Timed out waiting to write issue '{id}'.");
+            }
+        }
+    }
+
+    private FileStream AcquireRelationshipLock()
+    {
+        var lockPath = Path.Combine(_issuesDirectory, ".relationships.lock");
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (true)
+        {
+            ProjectLocator.RejectLink(lockPath);
+            try
+            {
+                return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException) when (DateTime.UtcNow < deadline)
+            {
+                Thread.Sleep(50);
+            }
+            catch (UnauthorizedAccessException exception)
+            {
+                throw new IssueException($"Cannot lock issue relationships: {exception.Message}");
+            }
+
+            if (DateTime.UtcNow >= deadline)
+            {
+                throw new IssueException("Timed out waiting to update issue relationships.");
             }
         }
     }

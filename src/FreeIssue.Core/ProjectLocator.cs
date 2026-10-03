@@ -6,6 +6,11 @@ public sealed record ProjectConfig(int FormatVersion);
 
 public static class ProjectLocator
 {
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
     public const string DataDirectoryName = ".free-issue";
     public const string IssuesDirectoryName = "issues";
     public const string ConfigFileName = "config.json";
@@ -45,18 +50,24 @@ public static class ProjectLocator
             throw new IssueException($"Refusing to overwrite existing Free Issue data at '{dataPath}'.");
         }
 
-        Directory.CreateDirectory(dataPath);
+        var temporaryPath = Path.Combine(root, $".{DataDirectoryName}.{Guid.NewGuid():N}.tmp");
+        Directory.CreateDirectory(temporaryPath);
         try
         {
-            Directory.CreateDirectory(Path.Combine(dataPath, IssuesDirectoryName));
+            Directory.CreateDirectory(Path.Combine(temporaryPath, IssuesDirectoryName));
             var config = JsonSerializer.Serialize(new ProjectConfig(CurrentFormatVersion),
-                new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(Path.Combine(dataPath, ConfigFileName), config + Environment.NewLine);
+                new JsonSerializerOptions(JsonOptions) { WriteIndented = true });
+            File.WriteAllText(Path.Combine(temporaryPath, ConfigFileName), config + Environment.NewLine);
+            Directory.Move(temporaryPath, dataPath);
             return root;
         }
         catch
         {
-            Directory.Delete(dataPath, recursive: true);
+            if (Directory.Exists(temporaryPath))
+            {
+                Directory.Delete(temporaryPath, recursive: true);
+            }
+
             throw;
         }
     }
@@ -65,7 +76,7 @@ public static class ProjectLocator
     {
         try
         {
-            var config = JsonSerializer.Deserialize<ProjectConfig>(File.ReadAllText(configPath))
+            var config = JsonSerializer.Deserialize<ProjectConfig>(File.ReadAllText(configPath), JsonOptions)
                          ?? throw new JsonException("Configuration is empty.");
             if (config.FormatVersion != CurrentFormatVersion)
             {
