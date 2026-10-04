@@ -360,7 +360,7 @@ internal static class Cli
             throw new IssueException("Noninteractive creation requires --title and --body-file (use '-' for stdin).");
         }
 
-        return await EditBodyAsync("# Context\n\n# Desired outcome\n\n# Acceptance criteria\n\n");
+        return await EditBodyAsync(string.Empty);
     }
 
     private static Task<string?> ReadOptionalBodyAsync(string? body, string? bodyFile)

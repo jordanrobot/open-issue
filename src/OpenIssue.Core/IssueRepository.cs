@@ -489,9 +489,9 @@ public sealed class IssueRepository(string projectRoot)
             throw new IssueException("Issue title must be a single line.");
         }
 
-        if (!issue.Draft && (issue.Status != IssueStatus.Open || !HasAcceptanceCriteria(issue.Body)))
+        if (!issue.Draft && issue.Status != IssueStatus.Open)
         {
-            throw new IssueException("A ready issue must be open and have nonempty Acceptance criteria.");
+            throw new IssueException("A ready issue must be open.");
         }
 
         if (issue.Tags.Any(string.IsNullOrWhiteSpace) || issue.Tags.Distinct(StringComparer.OrdinalIgnoreCase).Count() != issue.Tags.Count)
@@ -522,34 +522,6 @@ public sealed class IssueRepository(string projectRoot)
         {
             throw new IssueException("Relationship IDs must not contain duplicates.");
         }
-    }
-
-    private static bool HasAcceptanceCriteria(string body)
-    {
-        var lines = body.Split('\n');
-        var inSection = false;
-        foreach (var rawLine in lines)
-        {
-            var line = rawLine.TrimEnd('\r');
-            if (System.Text.RegularExpressions.Regex.IsMatch(line, @"^#{1,6}\s*Acceptance criteria\s*#*\s*$",
-                    System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant))
-            {
-                inSection = true;
-                continue;
-            }
-
-            if (inSection && System.Text.RegularExpressions.Regex.IsMatch(line, @"^#{1,6}\s+"))
-            {
-                return false;
-            }
-
-            if (inSection && !string.IsNullOrWhiteSpace(line))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private static void ValidateReferences(Issue issue, IReadOnlyCollection<Issue> existing)

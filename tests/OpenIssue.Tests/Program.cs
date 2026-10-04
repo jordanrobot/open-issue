@@ -161,8 +161,8 @@ static void ReadinessAndNext()
 {
     using var project = new TemporaryProject();
     var service = project.Service;
-    var blocked = service.Create("Blocked task", "# Acceptance criteria\n\nMust ship\n", IssuePriority.Low);
-    var blocker = service.Create("Urgent blocker", "# Acceptance criteria\n\nMust unblock\n", IssuePriority.Urgent);
+    var blocked = service.Create("Blocked task", "Must ship", IssuePriority.Low);
+    var blocker = service.Create("Urgent blocker", "Must unblock", IssuePriority.Urgent);
     service.SetDraft(blocked.Id.ToString(), false);
     service.SetDraft(blocker.Id.ToString(), false);
     Equal(0, service.List(new IssueFilter(Draft: true)).Issues.Count);
@@ -171,8 +171,14 @@ static void ReadinessAndNext()
     Equal(blocker.Id, service.Next()!.Id);
     service.SetStatus(blocker.Id.ToString(), IssueStatus.Closed);
     True(service.Next() is null, "blocked issue was selected");
-    var draft = service.Create("Draft", "Context only");
-    Throws<IssueException>(() => service.SetDraft(draft.Id.ToString(), false));
+    var bodyless = service.Create("Bodyless ready issue", "");
+    var ready = service.SetDraft(bodyless.Id.ToString(), false);
+    True(!ready.Draft, "a ready issue should not require a body or acceptance criteria");
+    Equal(bodyless.Id, service.Next()!.Id);
+
+    var closed = service.Create("Closed issue", "");
+    service.SetStatus(closed.Id.ToString(), IssueStatus.Closed);
+    Throws<IssueException>(() => service.SetDraft(closed.Id.ToString(), false));
 }
 
 static void Preservation()

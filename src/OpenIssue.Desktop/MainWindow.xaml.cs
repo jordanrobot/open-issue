@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -12,6 +14,8 @@ public partial class MainWindow : Window
 {
     private readonly ObservableCollection<Issue> _issues = [];
     private readonly DispatcherTimer _refreshTimer = new() { Interval = TimeSpan.FromMilliseconds(500) };
+    private readonly DispatcherTimer _saveTimer = new() { Interval = TimeSpan.FromMilliseconds(500) };
+    private readonly Dictionary<long, string> _knownRevisions = [];
     private IssueService? _service;
     private Issue? _current;
     private FileSystemWatcher? _watcher;
@@ -27,7 +31,18 @@ public partial class MainWindow : Window
             _refreshTimer.Stop();
             RefreshList();
         };
-        Closed += (_, _) => _watcher?.Dispose();
+        _saveTimer.Tick += (_, _) =>
+        {
+            _saveTimer.Stop();
+            SaveCurrent();
+        };
+        Closing += Window_Closing;
+        Closed += (_, _) =>
+        {
+            _refreshTimer.Stop();
+            _saveTimer.Stop();
+            _watcher?.Dispose();
+        };
         InitializeProject();
     }
 
@@ -88,10 +103,38 @@ public partial class MainWindow : Window
     {
         Dispatcher.BeginInvoke(() =>
         {
+            if (IsKnownRevision(args.FullPath))
+            {
+                return;
+            }
+
             MessageText.Text = "Issue files changed on disk. Refreshing…";
             _refreshTimer.Stop();
             _refreshTimer.Start();
         });
+    }
+
+    private bool IsKnownRevision(string path)
+    {
+        if (_service is null ||
+            !long.TryParse(Path.GetFileNameWithoutExtension(path), NumberStyles.None,
+                CultureInfo.InvariantCulture, out var id) ||
+            !_knownRevisions.TryGetValue(id, out var revision))
+        {
+            return false;
+        }
+
+        try
+        {
+            return string.Equals(
+                _service.Resolve(id.ToString(CultureInfo.InvariantCulture)).Revision,
+                revision,
+                StringComparison.Ordinal);
+        }
+        catch (Exception exception) when (exception is IssueException or IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private void RefreshList()
@@ -112,6 +155,11 @@ public partial class MainWindow : Window
                 Priority: priority == "all priority" ? null : ParsePriority(priority),
                 Draft: ReadyFilter.IsChecked == true ? false : null);
             var listed = _service.List(filter);
+            foreach (var issue in listed.Issues)
+            {
+                _knownRevisions[issue.Id] = issue.Revision;
+            }
+
             var result = string.IsNullOrEmpty(query)
                 ? listed
                 : new IssueListResult(_service.Search(query, filter), listed.Diagnostics);
@@ -141,19 +189,27 @@ public partial class MainWindow : Window
 
     private bool ConfirmLeaveCurrent()
     {
+        _saveTimer.Stop();
         if (_current is null || !IsDirty())
         {
             return true;
         }
 
-        var answer = MessageBox.Show(this, "Save changes before continuing?", "Unsaved changes",
-            MessageBoxButton.YesNoCancel, MessageBoxImage.Warning);
-        if (answer == MessageBoxResult.Cancel)
+        if (SaveCurrent())
+        {
+            return true;
+        }
+
+        var answer = MessageBox.Show(this,
+            $"{MessageText.Text}{Environment.NewLine}{Environment.NewLine}Discard unsaved changes and continue?",
+            "Autosave failed", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        if (answer != MessageBoxResult.Yes)
         {
             return false;
         }
 
-        return answer != MessageBoxResult.Yes || SaveCurrent();
+        LoadIssue(_current);
+        return true;
     }
 
     private bool IsDirty() =>
@@ -167,9 +223,16 @@ public partial class MainWindow : Window
 
     private bool SaveCurrent()
     {
+        _saveTimer.Stop();
         if (_service is null || _current is null)
         {
             return false;
+        }
+
+        if (!IsDirty())
+        {
+            MessageText.Text = "All changes are saved.";
+            return true;
         }
 
         try
@@ -180,13 +243,12 @@ public partial class MainWindow : Window
                 status: ParseStatus(Selected(StatusBox)),
                 draft: DraftBox.IsChecked != false);
             LoadIssue(_current);
-            MessageText.Text = "Issue saved.";
+            MessageText.Text = "Changes saved automatically.";
             return true;
         }
         catch (Exception exception) when (exception is IssueException or IOException or UnauthorizedAccessException)
         {
-            MessageText.Text = exception.Message;
-            MessageBox.Show(this, exception.Message, "Could not save issue", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageText.Text = $"Autosave failed: {exception.Message}";
             return false;
         }
     }
@@ -197,6 +259,11 @@ public partial class MainWindow : Window
         try
         {
             _current = issue;
+            if (issue is not null)
+            {
+                _knownRevisions[issue.Id] = issue.Revision;
+            }
+
             TitleBox.Text = issue?.Title ?? "";
             BodyBox.Text = issue?.Body ?? "";
             TagsBox.Text = issue is null ? "" : string.Join(", ", issue.Tags);
@@ -254,12 +321,24 @@ public partial class MainWindow : Window
 
     private void Window_Activated(object? sender, EventArgs e) => RefreshList();
 
-    private void Save_Click(object sender, RoutedEventArgs e)
+    private void Window_Closing(object? sender, CancelEventArgs e)
     {
-        if (SaveCurrent())
+        if (!ConfirmLeaveCurrent())
         {
-            RefreshList();
+            e.Cancel = true;
         }
+    }
+
+    private void Editor_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_loading || _current is null)
+        {
+            return;
+        }
+
+        MessageText.Text = "Saving changes...";
+        _saveTimer.Stop();
+        _saveTimer.Start();
     }
 
     private void Ready_Click(object sender, RoutedEventArgs e)
@@ -339,7 +418,7 @@ public partial class MainWindow : Window
 
         try
         {
-            var issue = _service.Create(title.IssueTitle, "# Context\n\n# Desired outcome\n\n# Acceptance criteria\n\n");
+            var issue = _service.Create(title.IssueTitle, string.Empty);
             RefreshList();
             IssueList.SelectedItem = _issues.FirstOrDefault(item => item.Id == issue.Id);
             TitleBox.Focus();

@@ -52,31 +52,32 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
-            <TextBox x:Name="TitleBox" Grid.Row="0" FontSize="20" Padding="6" Margin="0,0,0,8" />
+            <TextBox x:Name="TitleBox" Grid.Row="0" FontSize="20" Padding="6" Margin="0,0,0,8"
+                     TextChanged="Editor_Changed" />
             <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,8">
                 <TextBlock Text="Status" VerticalAlignment="Center" Margin="0,0,5,0" />
-                <ComboBox x:Name="StatusBox" Width="100" Margin="0,0,12,0">
+                <ComboBox x:Name="StatusBox" Width="100" Margin="0,0,12,0" SelectionChanged="Editor_Changed">
                     <ComboBoxItem Content="open" />
                     <ComboBoxItem Content="closed" />
                     <ComboBoxItem Content="declined" />
                 </ComboBox>
                 <TextBlock Text="Priority" VerticalAlignment="Center" Margin="0,0,5,0" />
-                <ComboBox x:Name="PriorityBox" Width="100" Margin="0,0,12,0">
+                <ComboBox x:Name="PriorityBox" Width="100" Margin="0,0,12,0" SelectionChanged="Editor_Changed">
                     <ComboBoxItem Content="urgent" />
                     <ComboBoxItem Content="high" />
                     <ComboBoxItem Content="normal" />
                     <ComboBoxItem Content="low" />
                 </ComboBox>
-                <CheckBox x:Name="DraftBox" Content="Draft" IsChecked="True" VerticalAlignment="Center" />
+                <CheckBox x:Name="DraftBox" Content="Draft" IsChecked="True" VerticalAlignment="Center"
+                          Checked="Editor_Changed" Unchecked="Editor_Changed" />
             </StackPanel>
             <TextBox x:Name="TagsBox" Grid.Row="2" Padding="6" Margin="0,0,0,8"
-                     ToolTip="Comma-separated tags" />
+                     ToolTip="Comma-separated tags" TextChanged="Editor_Changed" />
             <TextBox x:Name="BodyBox" Grid.Row="3" AcceptsReturn="True" AcceptsTab="True" TextWrapping="Wrap"
                      VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
-                     FontFamily="Consolas" Padding="8" />
+                     FontFamily="Consolas" Padding="8" TextChanged="Editor_Changed" />
             <TextBlock x:Name="MessageText" Grid.Row="4" Margin="0,8" TextWrapping="Wrap" />
             <WrapPanel Grid.Row="5" HorizontalAlignment="Left">
-                <Button Content="Save" Padding="10,5" Margin="0,0,6,0" Click="Save_Click" />
                 <Button Content="Mark ready" Padding="10,5" Margin="0,0,6,0" Click="Ready_Click" />
                 <Button Content="Mark draft" Padding="10,5" Margin="0,0,6,0" Click="Draft_Click" />
                 <Button Content="Close" Padding="10,5" Margin="0,0,6,0" Click="Close_Click" />
