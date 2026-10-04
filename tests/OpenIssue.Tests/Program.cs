@@ -6,6 +6,7 @@ var tests = new (string Name, Action Run)[]
     ("nested projects are isolated", NestedProjectIsolation),
     ("dangling project symlinks cannot fall through to a parent project", DanglingProjectLink),
     ("issue creation, listing, search, and Unicode", IssueOperations),
+    ("new issues are drafts by default", DraftByDefault),
     ("numeric issue IDs are allocated without collisions", NumericIdAllocation),
     ("readiness and deterministic next selection", ReadinessAndNext),
     ("unknown metadata, body, and line-ending preservation", Preservation),
@@ -96,6 +97,16 @@ static void IssueOperations()
     Equal(child.Id, service.Show(issue.Id.ToString()).Children.Single());
     service.Edit(child.Id.ToString(), parents: [issue.Id]);
     Equal(issue.Id, service.Show(child.Id.ToString()).Parents.Single());
+}
+
+static void DraftByDefault()
+{
+    using var project = new TemporaryProject();
+    var service = project.Service;
+    var issue = service.Create("Draft issue", "# Acceptance criteria\n\nComplete review\n");
+    True(!issue.Ready, "new issues should be drafts until explicitly marked ready");
+    var issueFile = File.ReadAllText(service.Repository.GetIssuePath(issue.Id));
+    True(issueFile.Contains("ready: false", StringComparison.Ordinal), "new issue was not persisted as a draft");
 }
 
 static void NumericIdAllocation()

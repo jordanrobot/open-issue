@@ -9,7 +9,7 @@ dotnet publish src/OpenIssue.Cli/OpenIssue.Cli.csproj -c Release -r win-x64 --se
 dotnet publish src/OpenIssue.Desktop/OpenIssue.Desktop.csproj -c Release -r win-x64 --self-contained true --no-restore -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o artifacts/win-x64/desktop
 ```
 
-Install the locally packed tool with `dotnet tool install --global --add-source artifacts/packages OpenIssue.Tool --version 1.0.0`. Once published to a NuGet feed, install it with `dotnet tool install --global OpenIssue.Tool`.
+Install the locally packed tool with `dotnet tool install --global --configfile scripts/NuGet.Config OpenIssue.Tool --version 1.0.0`. The config maps `OpenIssue.Tool` to the local `artifacts/packages` feed; this avoids `--add-source`, which NuGet does not allow when package source mapping is enabled. Once published to a NuGet feed, install it with `dotnet tool install --global OpenIssue.Tool`.
 
 Keep the SDK pin, NuGet package lock files, and publish commands with release records so restore and packaging use the reviewed versions. The desktop and CLI share the same core and on-disk Markdown format. Verify both executables on a clean Windows machine with networking disabled after publishing.
 

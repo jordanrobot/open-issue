@@ -14,10 +14,18 @@ The installed command is `issue`. Update it with `dotnet tool update --global Op
 
 To install the package built from this checkout:
 
-```sh
-dotnet pack src/OpenIssue.Cli/OpenIssue.Cli.csproj -c Release -o artifacts/packages
-dotnet tool install --global --add-source artifacts/packages OpenIssue.Tool --version 1.0.0
+```powershell
+.\scripts\build-install.ps1
 ```
+
+This packs the CLI to `artifacts/packages` and installs it globally as `issue`. To pack and install manually:
+
+```powershell
+dotnet pack src/OpenIssue.Cli/OpenIssue.Cli.csproj -c Release -o artifacts/packages
+dotnet tool install --global --configfile scripts/NuGet.Config OpenIssue.Tool --version 1.0.0
+```
+
+NuGet rejects `--add-source` when package source mapping is enabled. The supplied config maps `OpenIssue.Tool` to the local package feed, so you do not need to change your user-wide NuGet configuration.
 
 ## Initialize and use
 
@@ -44,6 +52,18 @@ JSON read commands write machine-readable output to stdout; errors have `error.c
 dotnet build OpenIssue.slnx
 dotnet run --project tests/OpenIssue.Tests
 ```
+
+PowerShell helpers are also available from the repository root:
+
+```powershell
+.\scripts\build.ps1
+.\scripts\test.ps1
+.\scripts\install.ps1
+.\scripts\uninstall.ps1
+.\scripts\build-install.ps1
+```
+
+`install.ps1` installs or replaces the global tool using the locally packed package; `uninstall.ps1` removes it.
 
 The CLI and core target portable .NET 10. The Windows desktop app uses WPF and is Windows-only. Build or publish it with `src/OpenIssue.Desktop/OpenIssue.Desktop.csproj`; the desktop UI shares the core and storage contract with the CLI.
 

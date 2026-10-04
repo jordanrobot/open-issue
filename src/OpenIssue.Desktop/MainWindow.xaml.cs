@@ -163,7 +163,7 @@ public partial class MainWindow : Window
          TagsBox.Text != string.Join(", ", _current.Tags) ||
          Selected(StatusBox) != _current.Status.ToString().ToLowerInvariant() ||
          Selected(PriorityBox) != _current.Priority.ToString().ToLowerInvariant() ||
-         ReadyBox.IsChecked != _current.Ready);
+         DraftBox.IsChecked != !_current.Ready);
 
     private bool SaveCurrent()
     {
@@ -178,7 +178,7 @@ public partial class MainWindow : Window
                 ParsePriority(Selected(PriorityBox)),
                 TagsBox.Text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
                 status: ParseStatus(Selected(StatusBox)),
-                ready: ReadyBox.IsChecked == true);
+                ready: DraftBox.IsChecked == false);
             LoadIssue(_current);
             MessageText.Text = "Issue saved.";
             return true;
@@ -202,7 +202,7 @@ public partial class MainWindow : Window
             TagsBox.Text = issue is null ? "" : string.Join(", ", issue.Tags);
             SetSelected(StatusBox, issue?.Status.ToString().ToLowerInvariant());
             SetSelected(PriorityBox, issue?.Priority.ToString().ToLowerInvariant());
-            ReadyBox.IsChecked = issue?.Ready ?? false;
+            DraftBox.IsChecked = issue is null || !issue.Ready;
             SetEditorEnabled(issue is not null);
         }
         finally
@@ -220,7 +220,7 @@ public partial class MainWindow : Window
         TagsBox.IsEnabled = enabled;
         StatusBox.IsEnabled = enabled;
         PriorityBox.IsEnabled = enabled;
-        ReadyBox.IsEnabled = enabled;
+        DraftBox.IsEnabled = enabled;
     }
 
     private void IssueList_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -281,7 +281,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void Unready_Click(object sender, RoutedEventArgs e) => SetStatusOrReady(ready: false);
+    private void Draft_Click(object sender, RoutedEventArgs e) => SetStatusOrReady(ready: false);
     private void Close_Click(object sender, RoutedEventArgs e) => SetStatus(IssueStatus.Closed);
     private void Decline_Click(object sender, RoutedEventArgs e) => SetStatus(IssueStatus.Declined);
     private void Reopen_Click(object sender, RoutedEventArgs e) => SetStatus(IssueStatus.Open);

@@ -25,7 +25,7 @@ Each issue is stored as `.issues/issues/<id>.md`, UTF-8 Markdown with a YAML fro
 | `id` | integer | Positive numeric ID and equal to the filename. |
 | `title` | string | Nonempty, single line. |
 | `status` | string | `open`, `closed`, or `declined`. |
-| `ready` | boolean | Defaults to false. |
+| `ready` | boolean | Defaults to false (draft). |
 | `priority` | string | `low`, `normal`, `high`, or `urgent`. |
 | `tags` | list of strings | Defaults to empty; entries must be nonempty and unique ignoring case. |
 | `created_at` | timestamp | UTC ISO 8601; immutable. |
@@ -69,7 +69,7 @@ What should be true when it is complete.
 - [ ] Public operations are documented.
 ```
 
-Context, Desired outcome, and Acceptance criteria are starter headings, not required for a draft. A ready issue must be open and have a nonempty Acceptance criteria section. Readiness authorizes selection by `next`, not autonomous implementation.
+New issues start as drafts (`ready: false`). In the desktop editor, unchecking Draft marks an issue ready. Context, Desired outcome, and Acceptance criteria are starter headings, not required for a draft. A ready issue must be open and have a nonempty Acceptance criteria section. Readiness authorizes selection by `next`, not autonomous implementation.
 
 ## Reads and writes
 

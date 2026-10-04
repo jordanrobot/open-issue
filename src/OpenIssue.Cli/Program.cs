@@ -85,7 +85,7 @@ internal static class Cli
             {
                 foreach (var issue in result.Issues)
                 {
-                    Console.WriteLine($"#{issue.Id,-5} {issue.Status.ToString().ToLowerInvariant(),-8} {issue.Priority.ToString().ToLowerInvariant(),-7} {(issue.Ready ? "ready" : "      ")}  {issue.Title}");
+                    Console.WriteLine($"#{issue.Id,-5} {issue.Status.ToString().ToLowerInvariant(),-8} {issue.Priority.ToString().ToLowerInvariant(),-7} {(issue.Ready ? "ready" : "draft"),-5}  {issue.Title}");
                 }
 
                 PrintDiagnostics(result.Diagnostics);
@@ -442,7 +442,7 @@ internal static class Cli
     }
 
     private static string FormatIssue(Issue issue) =>
-        $"{issue.Title}\nID: {issue.Id}\nStatus: {issue.Status.ToString().ToLowerInvariant()}\nReady: {issue.Ready}\nPriority: {issue.Priority.ToString().ToLowerInvariant()}\nParents: {string.Join(", ", issue.Parents)}\nChildren: {string.Join(", ", issue.Children)}\nTags: {string.Join(", ", issue.Tags)}\n\n{issue.Body}";
+        $"{issue.Title}\nID: {issue.Id}\nStatus: {issue.Status.ToString().ToLowerInvariant()}\nDraft: {!issue.Ready}\nPriority: {issue.Priority.ToString().ToLowerInvariant()}\nParents: {string.Join(", ", issue.Parents)}\nChildren: {string.Join(", ", issue.Children)}\nTags: {string.Join(", ", issue.Tags)}\n\n{issue.Body}";
 
     private static void PrintDiagnostics(IEnumerable<IssueDiagnostic> diagnostics)
     {
