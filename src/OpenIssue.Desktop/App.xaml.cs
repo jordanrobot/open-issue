@@ -2,7 +2,7 @@
 using System.Data;
 using System.Windows;
 
-namespace FreeIssue.Desktop;
+namespace OpenIssue.Desktop;
 
 /// <summary>
 /// Interaction logic for App.xaml
@@ -10,4 +10,3 @@ namespace FreeIssue.Desktop;
 public partial class App : Application
 {
 }
-

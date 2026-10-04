@@ -1,4 +1,4 @@
-# Free Issue: implementation plan
+# Open Issue: implementation plan
 
 ## Goal and boundaries
 
@@ -8,7 +8,7 @@ The first supported system is Windows desktop. Use a portable .NET core and CLI 
 
 ## Product decisions for the first release
 
-- Product name: **Free Issue**; executable: `free-issue`. Use **issue** in commands and documentation because it is familiar. Do not claim the generic `issue` command globally or name anything after Git. A short alias can be considered later.
+- Product name: **Open Issue**; executable: `issue`, installable as a .NET global tool. Use System.CommandLine for CLI parsing; evaluate terminal formatting separately.
 - An issue is a specification-capable Markdown document. The first release supports `open`, `closed`, and `declined`; `declined` covers closing without implementation. `ready` is an explicit boolean independent of status. `ready` authorizes *selection*, not autonomous implementation.
 - Windows UI: WPF using the shared application core. This is a Windows-only presentation layer, not a reason to put business rules or filesystem logic in the UI. Evaluate a separate cross-platform frontend only after the core and format are stable.
 - Prefer supported .NET SDK/runtime and first-party libraries where practical; select and pin the exact versions when implementation starts. Review the licensing, maturity, offline restore/distribution, and security of any additional packages before adoption.
@@ -16,13 +16,13 @@ The first supported system is Windows desktop. Use a portable .NET core and CLI 
 
 ## Storage contract (specify and test before building the UI)
 
-Project discovery walks upward from an explicit `--project` path or current directory until it finds `.free-issue/config.json`; `--project` may point directly to the project root. Do not inspect Git metadata. `init` creates `.free-issue/config.json` and `.free-issue/issues/`; it refuses to overwrite existing data. Configuration records a format version and only project-wide options actually needed. Unrecognized future format versions fail with an actionable error rather than being rewritten.
+Project discovery walks upward from the current directory until it finds `.issues/config.json`. Commands operate only on the nearest initialized project and are available from any descendant directory; commands cannot point at another project. Do not inspect Git metadata. `issue init` creates `.issues/config.json` and `.issues/issues/`; it refuses to overwrite existing data. Configuration records a format version and only project-wide options actually needed. Unrecognized future format versions fail with an actionable error rather than being rewritten.
 
-Each issue lives at `.free-issue/issues/<id>.md`, with UTF-8 text, YAML frontmatter, and a Markdown body. Use a lowercase UUID as the immutable ID and filename; never derive it from the title or a sequential shared counter. At minimum, frontmatter has `schema`, `id`, `title`, `status`, `ready`, `priority`, `tags`, `created_at`, and `updated_at`. Use UTC ISO 8601 timestamps. Define allowed values (`status`: open/closed/declined; `priority`: low/normal/high/urgent) and deterministic sorting. Preserve unknown frontmatter keys on update so newer metadata is not silently discarded. Preserve the Markdown body and line endings when changing metadata where feasible; do not rewrite files on read.
+Each issue lives at `.issues/issues/<id>.md`, with UTF-8 text, YAML frontmatter, and a Markdown body. Allocate positive numeric immutable IDs under a cross-process allocation lock; use each ID as its filename and never derive it from the title. At minimum, frontmatter has `schema`, numeric `id`, `title`, `status`, `ready`, `priority`, `tags`, `created_at`, `updated_at`, and lists of numeric `parents`, `children`, `related`, and `blocks`. Use UTC ISO 8601 timestamps. Define allowed values (`status`: open/closed/declined; `priority`: low/normal/high/urgent) and deterministic sorting. Preserve unknown frontmatter keys on update so newer metadata is not silently discarded. Preserve the Markdown body and line endings when changing metadata where feasible; do not rewrite files on read.
 
 Provide a documented starter template with sections for Context, Desired outcome, and Acceptance criteria; allow freeform Markdown rather than requiring every section for a draft. A ready issue must be open and have a nonempty acceptance-criteria section. At creation, body and title are user-supplied; define an editor fallback for interactive use and a noninteractive `--title`/`--body-file` route for scripts. Reject empty titles and invalid metadata with file-specific diagnostics. Treat malformed issues as errors for that issue while allowing other valid issues to be listed.
 
-References use stable IDs, not filenames or titles. In the first release, support an optional single `parent` ID and lists of `related` and `blocks` IDs; derive children and blocked-by views, rather than maintaining duplicate reverse links. Reject self-references, nonexistent IDs, and parent/blocking cycles on mutation; report existing broken references without deleting data. Linked source files and milestones can be added in a subsequent format-compatible increment. Document how manual edits are validated.
+References use stable numeric IDs, not filenames or titles. Support lists of `parents`, `children`, `related`, and `blocks`; reject self-references, nonexistent IDs, and parent/child or blocking cycles on mutation; report existing broken references without deleting data. Milestones/epics/projects may later build on the issue relationship format. Document how manual edits are validated.
 
 Do not expose arbitrary filesystem paths through IDs or references. Resolve issue paths only from validated IDs within the project issue directory; define a policy for symlinks and reject paths that escape the project. Treat Markdown as untrusted for rendering: disable raw HTML or sanitize it, and do not execute embedded commands. Limit UI binding to loopback if a local web UI is ever introduced.
 
@@ -38,7 +38,7 @@ Writes must be atomic on the same filesystem: write and flush a temporary file i
 
 ## CLI contract
 
-Start with `free-issue init`, `new`, `list`, `show <id>`, `edit <id>`, `close <id>`, `decline <id>`, `reopen <id>`, `search <query>`, `next`, and `help`. Add `ready <id>` / `unready <id>` and relationship editing via explicit commands or documented `edit` fields. `list` filters by status (including closed/declined), tag, priority, and readiness; tags can be enumerated without a second database. Accept full IDs and only unambiguous ID prefixes; ambiguous prefixes must fail. `next` selects the highest-priority open, ready, unblocked issue using a documented stable tie-breaker; it does not start work. Default search is case-insensitive text over title, tags, and body; exact and regex search are later enhancements after query semantics and safe regex timeouts are defined. Commands must not prompt when input/output is redirected unless explicitly requested.
+Start with `issue init`, `new`, `list`, `show <id>`, `edit <id>`, `close <id>`, `decline <id>`, `reopen <id>`, `search <query>`, `next`, and `help`. Add `ready <id>` / `unready <id>` and relationship editing via explicit commands or documented `edit` fields. `list` filters by status (including closed/declined), tag, priority, and readiness; tags can be enumerated without a second database. IDs are positive integers. `next` selects the highest-priority open, ready, unblocked issue using a documented stable tie-breaker; it does not start work. Default search is case-insensitive text over title, tags, and body; exact and regex search are later enhancements after query semantics and safe regex timeouts are defined. Commands must not prompt when input/output is redirected unless explicitly requested.
 
 ## Sequenced Luna-agent work packages
 

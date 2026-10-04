@@ -1,5 +1,5 @@
 ---
 schema: [not, an, integer
-id: invalid
+id: not-a-number
 ---
 Malformed fixture.

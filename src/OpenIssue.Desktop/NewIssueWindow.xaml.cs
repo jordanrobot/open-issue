@@ -1,6 +1,6 @@
 using System.Windows;
 
-namespace FreeIssue.Desktop;
+namespace OpenIssue.Desktop;
 
 public partial class NewIssueWindow : Window
 {

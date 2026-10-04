@@ -1,4 +1,4 @@
-namespace FreeIssue.Core;
+namespace OpenIssue.Core;
 
 public sealed class IssueService(IssueRepository repository)
 {
@@ -31,20 +31,18 @@ public sealed class IssueService(IssueRepository repository)
         return new IssueListResult(issues.OrderBy(issue => issue.Status)
             .ThenByDescending(issue => issue.Priority)
             .ThenBy(issue => issue.CreatedAt)
-            .ThenBy(issue => issue.Id, StringComparer.Ordinal).ToArray(), result.Diagnostics);
+            .ThenBy(issue => issue.Id).ToArray(), result.Diagnostics);
     }
 
     public Issue Resolve(string idOrPrefix)
     {
-        var candidates = Repository.List().Issues
-            .Where(issue => issue.Id.StartsWith(idOrPrefix, StringComparison.Ordinal))
-            .ToArray();
-        return candidates.Length switch
+        if (!long.TryParse(idOrPrefix, System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out var id) || id < 1)
         {
-            1 => candidates[0],
-            0 => throw new IssueException($"No issue matches ID or prefix '{idOrPrefix}'."),
-            _ => throw new IssueException($"Issue ID prefix '{idOrPrefix}' is ambiguous; use a longer prefix.")
-        };
+            throw new IssueException($"Issue ID must be a positive integer: '{idOrPrefix}'.");
+        }
+
+        return Repository.Read(id);
     }
 
     public Issue Show(string idOrPrefix) => Resolve(idOrPrefix);
@@ -54,7 +52,7 @@ public sealed class IssueService(IssueRepository repository)
         var now = DateTimeOffset.UtcNow;
         return Repository.Create(new Issue
         {
-            Id = Guid.NewGuid().ToString("D"),
+            Id = 0,
             Title = title,
             Body = body,
             Priority = priority,
@@ -70,9 +68,10 @@ public sealed class IssueService(IssueRepository repository)
         string? body = null,
         IssuePriority? priority = null,
         IEnumerable<string>? tags = null,
-        string? parent = null,
-        IEnumerable<string>? related = null,
-        IEnumerable<string>? blocks = null,
+        IEnumerable<long>? parents = null,
+        IEnumerable<long>? children = null,
+        IEnumerable<long>? related = null,
+        IEnumerable<long>? blocks = null,
         IssueStatus? status = null,
         bool? ready = null)
     {
@@ -97,19 +96,24 @@ public sealed class IssueService(IssueRepository repository)
             current.Tags = tags.ToList();
         }
 
-        if (parent is not null)
+        if (parents is not null)
         {
-            current.Parent = parent.Equals("none", StringComparison.OrdinalIgnoreCase) ? null : Resolve(parent).Id;
+            current.Parents = parents.ToList();
+        }
+
+        if (children is not null)
+        {
+            current.Children = children.ToList();
         }
 
         if (related is not null)
         {
-            current.Related = related.Select(reference => Resolve(reference).Id).ToList();
+            current.Related = related.ToList();
         }
 
         if (blocks is not null)
         {
-            current.Blocks = blocks.Select(reference => Resolve(reference).Id).ToList();
+            current.Blocks = blocks.ToList();
         }
 
         if (status is not null)
@@ -165,11 +169,11 @@ public sealed class IssueService(IssueRepository repository)
     public Issue? Next()
     {
         var issues = Repository.List().Issues;
-        var blocked = issues.SelectMany(issue => issue.Blocks).ToHashSet(StringComparer.Ordinal);
+        var blocked = issues.SelectMany(issue => issue.Blocks).ToHashSet();
         return issues.Where(issue => issue.Status == IssueStatus.Open && issue.Ready && !blocked.Contains(issue.Id))
             .OrderByDescending(issue => issue.Priority)
             .ThenBy(issue => issue.CreatedAt)
-            .ThenBy(issue => issue.Id, StringComparer.Ordinal)
+            .ThenBy(issue => issue.Id)
             .FirstOrDefault();
     }
 }

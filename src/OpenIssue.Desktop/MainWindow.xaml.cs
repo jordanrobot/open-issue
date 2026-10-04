@@ -3,10 +3,10 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
-using FreeIssue.Core;
+using OpenIssue.Core;
 using Microsoft.Win32;
 
-namespace FreeIssue.Desktop;
+namespace OpenIssue.Desktop;
 
 public partial class MainWindow : Window
 {
@@ -42,8 +42,8 @@ public partial class MainWindow : Window
         {
             var dialog = new OpenFileDialog
             {
-                Title = "Select a Free Issue project's .free-issue/config.json",
-                Filter = "Free Issue configuration (config.json)|config.json",
+                Title = "Select an Open Issue project's .issues/config.json",
+                Filter = "Open Issue configuration (config.json)|config.json",
                 CheckFileExists = true
             };
             if (dialog.ShowDialog(this) != true)
@@ -69,7 +69,7 @@ public partial class MainWindow : Window
     private void SetProject(string root)
     {
         _service = new IssueService(new IssueRepository(root));
-        Title = $"Free Issue — {root}";
+        Title = $"Open Issue — {root}";
         var issuesPath = ProjectLocator.GetIssuesDirectory(root);
         Directory.CreateDirectory(issuesPath);
         _watcher = new FileSystemWatcher(issuesPath, "*.md")
@@ -174,7 +174,7 @@ public partial class MainWindow : Window
 
         try
         {
-            _current = _service.Edit(_current.Id, TitleBox.Text, BodyBox.Text,
+            _current = _service.Edit(_current.Id.ToString(), TitleBox.Text, BodyBox.Text,
                 ParsePriority(Selected(PriorityBox)),
                 TagsBox.Text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
                 status: ParseStatus(Selected(StatusBox)),
@@ -271,7 +271,7 @@ public partial class MainWindow : Window
 
         try
         {
-            _current = _service.SetReady(_current.Id, true);
+            _current = _service.SetReady(_current.Id.ToString(), true);
             LoadIssue(_current);
             RefreshList();
         }
@@ -295,7 +295,7 @@ public partial class MainWindow : Window
 
         try
         {
-            _current = _service.SetReady(_current.Id, ready);
+            _current = _service.SetReady(_current.Id.ToString(), ready);
             LoadIssue(_current);
             RefreshList();
         }
@@ -314,7 +314,7 @@ public partial class MainWindow : Window
 
         try
         {
-            _current = _service.SetStatus(_current.Id, status);
+            _current = _service.SetStatus(_current.Id.ToString(), status);
             LoadIssue(_current);
             RefreshList();
         }

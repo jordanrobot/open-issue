@@ -1,4 +1,4 @@
-namespace FreeIssue.Core;
+namespace OpenIssue.Core;
 
 public enum IssueStatus
 {
@@ -17,7 +17,7 @@ public enum IssuePriority
 
 public sealed class Issue
 {
-    public required string Id { get; init; }
+    public required long Id { get; set; }
     public required string Title { get; set; }
     public IssueStatus Status { get; set; } = IssueStatus.Open;
     public bool Ready { get; set; }
@@ -25,9 +25,10 @@ public sealed class Issue
     public List<string> Tags { get; set; } = [];
     public required DateTimeOffset CreatedAt { get; set; }
     public required DateTimeOffset UpdatedAt { get; set; }
-    public string? Parent { get; set; }
-    public List<string> Related { get; set; } = [];
-    public List<string> Blocks { get; set; } = [];
+    public List<long> Parents { get; set; } = [];
+    public List<long> Children { get; set; } = [];
+    public List<long> Related { get; set; } = [];
+    public List<long> Blocks { get; set; } = [];
     public required string Body { get; set; }
     public string Revision { get; internal set; } = "";
     internal YamlDotNet.RepresentationModel.YamlMappingNode? Frontmatter { get; set; }

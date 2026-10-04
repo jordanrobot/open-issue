@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\FreeIssue.Core\FreeIssue.Core.csproj" />
+    <ProjectReference Include="..\OpenIssue.Core\OpenIssue.Core.csproj" />
   </ItemGroup>
 
   <PropertyGroup>
@@ -11,6 +11,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <RootNamespace>OpenIssue.Desktop</RootNamespace>
+    <AssemblyName>OpenIssue.Desktop</AssemblyName>
   </PropertyGroup>
 
 </Project>

@@ -1,43 +1,48 @@
-# Free Issue project and issue format
+# Open Issue project and issue format
 
-## Project files
+## Project files and isolation
 
-`free-issue init` creates:
+`issue init` creates:
 
 ```text
-.free-issue/
+.issues/
   config.json
+  next-id
   issues/
 ```
 
-`config.json` is UTF-8 JSON with a `formatVersion` integer. Version `1` is the only supported version. An unknown version is rejected and never rewritten. `init` refuses to overwrite an existing `.free-issue` path. Project discovery walks from `--project` (or the current directory) toward its parents and looks only for `.free-issue/config.json`; Git metadata is not inspected.
+`config.json` contains the `formatVersion` integer. Version `1` is supported; unknown versions fail without rewriting data. Initialization refuses to overwrite an existing `.issues` path.
+
+Issue commands locate the closest `.issues/config.json` walking upward from the current working directory. This makes the command available from any project subfolder. It always operates on the issue store rooted at that marker; it has no option to point an existing project command at another issue store. If another project is initialized inside a subfolder, commands run there use the nested project and cannot read or mutate its parent project’s issue store. Legacy `.free-issue` directories are not discovered or automatically migrated; they are left untouched.
 
 ## Issue Markdown
 
-Every issue is a UTF-8 Markdown file named `.free-issue/issues/<id>.md`. The ID is a lowercase canonical UUID (`xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`), immutable, and independent of its title. Each file has exactly one YAML mapping between opening and closing `---` lines, followed by an unmodified Markdown body.
-
-Required metadata:
+Each issue is stored as `.issues/issues/<id>.md`, UTF-8 Markdown with a YAML frontmatter mapping between `---` lines, followed by the Markdown body. IDs are positive, monotonically allocated integers, immutable within the project, and independent of titles. The `next-id` high-water mark and a cross-process allocation lock prevent ID reuse after deletion and ensure creating an issue does not overwrite a previous issue.
 
 | Key | Type | Rules |
 | --- | --- | --- |
-| `schema` | integer | Must be `1`; other versions are not rewritten. |
-| `id` | string | Lowercase canonical UUID and equal to the filename. |
+| `schema` | integer | Must be `2`. |
+| `id` | integer | Positive numeric ID and equal to the filename. |
 | `title` | string | Nonempty, single line. |
 | `status` | string | `open`, `closed`, or `declined`. |
-| `ready` | boolean | Defaults to false for newly created issues. |
+| `ready` | boolean | Defaults to false. |
 | `priority` | string | `low`, `normal`, `high`, or `urgent`. |
-| `tags` | list of strings | Defaults to an empty list; tags must be nonempty and unique ignoring case. |
-| `created_at` | timestamp | UTC ISO 8601 timestamp. Immutable after creation. |
-| `updated_at` | timestamp | UTC ISO 8601 timestamp, refreshed on edits. |
+| `tags` | list of strings | Defaults to empty; entries must be nonempty and unique ignoring case. |
+| `created_at` | timestamp | UTC ISO 8601; immutable. |
+| `updated_at` | timestamp | UTC ISO 8601; refreshed on edit. |
+| `parents` | list of integers | IDs of parent issues. |
+| `children` | list of integers | IDs of child issues. |
+| `related` | list of integers | IDs of related issues. |
+| `blocks` | list of integers | IDs of issues blocked by this issue. |
 
-`parent` is an optional single issue ID; `related` and `blocks` are optional lists of IDs. Relationships are stored only in the forward direction. Children and blocked-by relationships are derived when queried. All references must identify existing issues. Self-links and cycles in `parent` or `blocks` are rejected. Broken references in hand-edited files are reported as issue diagnostics; files are not deleted. Unknown frontmatter keys are preserved when an issue is edited.
+Relationship lists are explicit, support multiple links at every level, and do not require reciprocal entries. Every referenced ID must exist. Self-links and parent/child or blocking cycles are rejected on mutation. Broken references in manually edited files produce diagnostics without deleting issue data. Unknown frontmatter fields are retained when updating.
 
 Example:
 
 ```yaml
 ---
-schema: 1
-id: 6f861c30-089d-4ea0-9ea3-bd5a29b2736c
+schema: 2
+id: 1
 title: Document the public API
 status: open
 ready: false
@@ -46,6 +51,10 @@ tags:
 - docs
 created_at: "2026-10-03T20:00:00.0000000+00:00"
 updated_at: "2026-10-03T20:00:00.0000000+00:00"
+parents: []
+children: [2]
+related: []
+blocks: []
 ---
 # Context
 
@@ -60,14 +69,14 @@ What should be true when it is complete.
 - [ ] Public operations are documented.
 ```
 
-The Context, Desired outcome, and Acceptance criteria headings are a starter template, not a requirement for drafts. `ready: true` is allowed only for an open issue with a nonempty `Acceptance criteria` section. Readiness authorizes selection by `next`; it does not authorize an agent or tool to modify source code.
+Context, Desired outcome, and Acceptance criteria are starter headings, not required for a draft. A ready issue must be open and have a nonempty Acceptance criteria section. Readiness authorizes selection by `next`, not autonomous implementation.
 
-## Reads, validation, and edits
+## Reads and writes
 
-Files are never rewritten during reads. Malformed files produce diagnostics for that file while valid files remain available. IDs are validated before constructing issue paths; symbolic links/reparse points in the data directory and issue files are rejected. Markdown is plain text in this application and is never executed or rendered as trusted HTML.
+Files are never rewritten on read. Malformed issue files are reported individually; other valid issues remain available. IDs are validated before path construction. Symlinks/reparse points for the project data directory, issue directory, and issue files are rejected. Markdown is not executed or treated as trusted HTML.
 
-Writes use a temporary file in the issue directory, flush it, and move it into place. Per-issue exclusive lock files coordinate processes. Updates compare the SHA-256 revision read by the caller with the current file contents; a mismatch reports a conflict rather than replacing a manual or concurrent edit. A manual edit should retain valid YAML, the same ID/filename, allowed enum values, and valid references. Files can be edited with any UTF-8 text editor; the next Free Issue read validates them.
+Writes use a temporary file in the issue directory, flush it, and move it into place. Per-issue exclusive locks coordinate writers; issue creation also takes a project-wide allocation lock. An update checks the caller’s SHA-256 revision before preparing and immediately before replacing the file, reporting conflicts instead of overwriting manual/concurrent edits. Manual edits should preserve YAML validity, the filename/ID match, allowed values, and numeric references.
 
 ## Ordering and selection
 
-Lists are ordered by status (`open`, then `closed`, then `declined`), priority descending (`urgent`, `high`, `normal`, `low`), creation time ascending, then ID ordinal. `next` considers only open, ready issues not referenced by another issue's `blocks`; ties use priority descending, creation time ascending, then ID ordinal. `next` only reports an issue and never starts work.
+Lists are ordered by status (`open`, `closed`, `declined`), priority descending (`urgent`, `high`, `normal`, `low`), creation time ascending, then numeric ID ascending. `next` considers open, ready, unblocked issues and uses priority descending, creation time ascending, then numeric ID ascending. It reports an issue; it does not start work.

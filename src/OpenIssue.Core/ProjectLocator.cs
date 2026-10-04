@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace FreeIssue.Core;
+namespace OpenIssue.Core;
 
 public sealed record ProjectConfig(int FormatVersion);
 
@@ -11,7 +11,7 @@ public static class ProjectLocator
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
-    public const string DataDirectoryName = ".free-issue";
+    public const string DataDirectoryName = ".issues";
     public const string IssuesDirectoryName = "issues";
     public const string ConfigFileName = "config.json";
     public const int CurrentFormatVersion = 1;
@@ -27,9 +27,17 @@ public static class ProjectLocator
         var directory = new DirectoryInfo(path);
         while (directory is not null)
         {
-            var configPath = Path.Combine(directory.FullName, DataDirectoryName, ConfigFileName);
-            if (File.Exists(configPath))
+            var dataPath = Path.Combine(directory.FullName, DataDirectoryName);
+            if (Directory.Exists(dataPath) || File.Exists(dataPath))
             {
+                RejectLink(dataPath);
+                var configPath = Path.Combine(dataPath, ConfigFileName);
+                if (!File.Exists(configPath))
+                {
+                    throw new IssueException($"Found '{dataPath}' but it has no '{ConfigFileName}'. Refusing to use another issue project.");
+                }
+
+                RejectLink(configPath);
                 ReadConfig(configPath);
                 return directory.FullName;
             }
@@ -37,7 +45,7 @@ public static class ProjectLocator
             directory = directory.Parent;
         }
 
-        throw new IssueException($"No Free Issue project found from '{path}'. Run 'free-issue init' or pass --project.");
+        throw new IssueException($"No Open Issue project found from '{path}'. Run 'issue init' in the project directory.");
     }
 
     public static string Initialize(string? projectPath = null)
@@ -47,7 +55,7 @@ public static class ProjectLocator
         var dataPath = Path.Combine(root, DataDirectoryName);
         if (Directory.Exists(dataPath) || File.Exists(dataPath))
         {
-            throw new IssueException($"Refusing to overwrite existing Free Issue data at '{dataPath}'.");
+            throw new IssueException($"Refusing to overwrite existing Open Issue data at '{dataPath}'.");
         }
 
         var temporaryPath = Path.Combine(root, $".{DataDirectoryName}.{Guid.NewGuid():N}.tmp");
@@ -58,6 +66,7 @@ public static class ProjectLocator
             var config = JsonSerializer.Serialize(new ProjectConfig(CurrentFormatVersion),
                 new JsonSerializerOptions(JsonOptions) { WriteIndented = true });
             File.WriteAllText(Path.Combine(temporaryPath, ConfigFileName), config + Environment.NewLine);
+            File.WriteAllText(Path.Combine(temporaryPath, "next-id"), "1" + Environment.NewLine);
             Directory.Move(temporaryPath, dataPath);
             return root;
         }

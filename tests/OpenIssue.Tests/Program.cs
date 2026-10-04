@@ -1,9 +1,11 @@
-using FreeIssue.Core;
+using OpenIssue.Core;
 
 var tests = new (string Name, Action Run)[]
 {
     ("project initialization and discovery", ProjectInitialization),
+    ("nested projects are isolated", NestedProjectIsolation),
     ("issue creation, listing, search, and Unicode", IssueOperations),
+    ("numeric issue IDs are allocated without collisions", NumericIdAllocation),
     ("readiness and deterministic next selection", ReadinessAndNext),
     ("unknown metadata, body, and line-ending preservation", Preservation),
     ("stale revisions do not overwrite edits", RevisionConflict),
@@ -39,11 +41,25 @@ static void ProjectInitialization()
     var child = Directory.CreateDirectory(Path.Combine(project.Root, "src", "nested")).FullName;
     Equal(project.Root, ProjectLocator.Find(child));
     Throws<IssueException>(() => ProjectLocator.Initialize(project.Root));
-    var config = File.ReadAllText(Path.Combine(project.Root, ".free-issue", "config.json"));
+    var config = File.ReadAllText(Path.Combine(project.Root, ".issues", "config.json"));
     True(config.Contains("\"formatVersion\": 1", StringComparison.Ordinal), "configuration formatVersion was not camel-cased");
-    File.WriteAllText(Path.Combine(project.Root, ".free-issue", "config.json"), "{\"formatVersion\":2}");
+    File.WriteAllText(Path.Combine(project.Root, ".issues", "config.json"), "{\"formatVersion\":2}");
     Throws<IssueException>(() => ProjectLocator.Find(project.Root));
     True(!Directory.Exists(Path.Combine(project.Root, ".git")), "test project unexpectedly has Git metadata");
+}
+
+static void NestedProjectIsolation()
+{
+    using var project = new TemporaryProject();
+    var outerIssue = project.Service.Create("Outer issue", "Draft");
+    var nestedRoot = Path.Combine(project.Root, "nested");
+    ProjectLocator.Initialize(nestedRoot);
+    var nestedService = new IssueService(new IssueRepository(nestedRoot));
+    nestedService.Create("Nested issue", "Draft");
+    Equal(nestedRoot, ProjectLocator.Find(Path.Combine(nestedRoot, "src")));
+    Equal(1, project.Service.List().Issues.Count);
+    Equal(1, nestedService.List().Issues.Count);
+    Equal(outerIssue.Id, project.Service.List().Issues[0].Id);
 }
 
 static void IssueOperations()
@@ -51,10 +67,32 @@ static void IssueOperations()
     using var project = new TemporaryProject();
     var service = project.Service;
     var issue = service.Create("Café docs", "# Context\n\nbody\n", IssuePriority.High, ["Docs"]);
-    Equal("Café docs", service.Show(issue.Id[..8]).Title);
+    Equal(1L, issue.Id);
+    Equal("Café docs", service.Show(issue.Id.ToString()).Title);
     Equal(1, service.List(new IssueFilter(Tag: "docs")).Issues.Count);
     Equal(1, service.Search("CAFÉ body").Count);
-    Equal(IssuePriority.High, service.Show(issue.Id).Priority);
+    Equal(IssuePriority.High, service.Show(issue.Id.ToString()).Priority);
+    var child = service.Create("Child", "Draft");
+    service.Edit(issue.Id.ToString(), children: [child.Id]);
+    Equal(child.Id, service.Show(issue.Id.ToString()).Children.Single());
+    service.Edit(child.Id.ToString(), parents: [issue.Id]);
+    Equal(issue.Id, service.Show(child.Id.ToString()).Parents.Single());
+}
+
+static void NumericIdAllocation()
+{
+    using var project = new TemporaryProject();
+    var services = Enumerable.Range(0, 12)
+        .Select(_ => new IssueService(new IssueRepository(project.Root)))
+        .ToArray();
+    var creates = services.Select((service, index) =>
+        Task.Run(() => service.Create($"Concurrent {index}", "Draft").Id)).ToArray();
+    Task.WaitAll(creates);
+    var ids = creates.Select(task => task.Result).Order().ToArray();
+    True(ids.SequenceEqual(Enumerable.Range(1, 12).Select(value => (long)value)),
+        "concurrent IDs were duplicated or skipped");
+    File.Delete(services[0].Repository.GetIssuePath(ids[^1]));
+    Equal(13L, services[0].Create("After deletion", "Draft").Id);
 }
 
 static void ReadinessAndNext()
@@ -63,24 +101,24 @@ static void ReadinessAndNext()
     var service = project.Service;
     var blocked = service.Create("Blocked task", "# Acceptance criteria\n\nMust ship\n", IssuePriority.Low);
     var blocker = service.Create("Urgent blocker", "# Acceptance criteria\n\nMust unblock\n", IssuePriority.Urgent);
-    service.SetReady(blocked.Id, true);
-    service.SetReady(blocker.Id, true);
-    service.Edit(blocker.Id, blocks: [blocked.Id]);
+    service.SetReady(blocked.Id.ToString(), true);
+    service.SetReady(blocker.Id.ToString(), true);
+    service.Edit(blocker.Id.ToString(), blocks: [blocked.Id]);
     Equal(blocker.Id, service.Next()!.Id);
-    service.SetStatus(blocker.Id, IssueStatus.Closed);
+    service.SetStatus(blocker.Id.ToString(), IssueStatus.Closed);
     True(service.Next() is null, "blocked issue was selected");
     var draft = service.Create("Draft", "Context only");
-    Throws<IssueException>(() => service.SetReady(draft.Id, true));
+    Throws<IssueException>(() => service.SetReady(draft.Id.ToString(), true));
 }
 
 static void Preservation()
 {
     using var project = new TemporaryProject();
     var repository = project.Service.Repository;
-    var id = "00000000-0000-4000-8000-000000000111";
+    const long id = 111;
     var content = string.Join("\r\n",
         "---",
-        "schema: 1",
+        "schema: 2",
         $"id: {id}",
         "title: Original",
         "status: open",
@@ -89,6 +127,10 @@ static void Preservation()
         "tags: []",
         "created_at: \"2026-01-01T00:00:00.0000000+00:00\"",
         "updated_at: \"2026-01-01T00:00:00.0000000+00:00\"",
+        "parents: []",
+        "children: []",
+        "related: []",
+        "blocks: []",
         "future_field:",
         "  nested: retained",
         "---",
@@ -118,7 +160,7 @@ static void RevisionConflict()
     service.Repository.Update(first, first.Revision);
     stale.Title = "Stale write";
     Throws<IssueException>(() => service.Repository.Update(stale, stale.Revision));
-    Equal("First write", service.Show(issue.Id).Title);
+    Equal("First write", service.Show(issue.Id.ToString()).Title);
 }
 
 static void ConcurrentWriters()
@@ -194,10 +236,10 @@ static void InvalidFiles()
     using var project = new TemporaryProject();
     var service = project.Service;
     service.Create("Valid", "Draft");
-    var malformedId = "00000000-0000-4000-8000-000000000222";
+    const long malformedId = 222;
     File.WriteAllText(service.Repository.GetIssuePath(malformedId),
         $"---\nschema: 99\nid: {malformedId}\n---\nbody\n");
-    var yamlErrorId = "00000000-0000-4000-8000-000000000223";
+    const long yamlErrorId = 223;
     File.WriteAllText(service.Repository.GetIssuePath(yamlErrorId), "---\nschema: [invalid\n---\n");
     var result = service.List();
     Equal(1, result.Issues.Count);
@@ -212,9 +254,9 @@ static void References()
     var service = project.Service;
     var first = service.Create("First", "Draft");
     var second = service.Create("Second", "Draft");
-    service.Edit(first.Id, blocks: [second.Id]);
-    Throws<IssueException>(() => service.Edit(second.Id, blocks: [first.Id]));
-    Throws<IssueException>(() => service.Edit(first.Id, parent: first.Id));
+    service.Edit(first.Id.ToString(), children: [second.Id]);
+    Throws<IssueException>(() => service.Edit(second.Id.ToString(), children: [first.Id]));
+    Throws<IssueException>(() => service.Edit(first.Id.ToString(), parents: [first.Id]));
 }
 
 static void BrokenReferences()
@@ -222,7 +264,7 @@ static void BrokenReferences()
     using var project = new TemporaryProject();
     var issue = project.Service.Create("Broken relationship", "Draft");
     var file = project.Service.Repository.GetIssuePath(issue.Id);
-    var content = File.ReadAllText(file).Replace("blocks: []", "blocks:\n- 00000000-0000-4000-8000-000000000999", StringComparison.Ordinal);
+    var content = File.ReadAllText(file).Replace("blocks: []", "blocks:\n- 999", StringComparison.Ordinal);
     File.WriteAllText(file, content);
     var result = project.Service.List();
     Equal(1, result.Issues.Count);
@@ -233,7 +275,7 @@ static void BrokenReferences()
 static void SymlinkIssues()
 {
     using var project = new TemporaryProject();
-    var id = "00000000-0000-4000-8000-000000000333";
+    const long id = 333;
     var outside = Path.Combine(project.Root, "outside.md");
     File.WriteAllText(outside, "not an issue");
     try
@@ -255,7 +297,7 @@ static void SymlinkIssues()
 static void UnsafeIds()
 {
     using var project = new TemporaryProject();
-    Throws<IssueException>(() => project.Service.Repository.Read("../outside"));
+    Throws<IssueException>(() => project.Service.Repository.Read(0));
 }
 
 static void True(bool condition, string message)

@@ -1,4 +1,4 @@
-<Window x:Class="FreeIssue.Desktop.NewIssueWindow"
+<Window x:Class="OpenIssue.Desktop.NewIssueWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="New issue" SizeToContent="WidthAndHeight" WindowStartupLocation="CenterOwner"

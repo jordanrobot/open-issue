@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/OpenIssue.Cli/OpenIssue.Cli.csproj" />
+    <Project Path="src/OpenIssue.Core/OpenIssue.Core.csproj" />
+    <Project Path="src/OpenIssue.Desktop/OpenIssue.Desktop.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/OpenIssue.Tests/OpenIssue.Tests.csproj" />
+  </Folder>
+</Solution>
