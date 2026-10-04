@@ -1,0 +1,88 @@
+<Window x:Class="OpenIssue.Desktop.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Open Issue" Height="760" Width="1120" MinHeight="540" MinWidth="820"
+        Activated="Window_Activated">
+    <Grid Margin="12">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="360" />
+            <ColumnDefinition Width="12" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <Grid Grid.Column="0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <TextBox x:Name="SearchBox" Margin="0,0,0,8" Padding="6" ToolTip="Search title, tags, and issue body"
+                     TextChanged="Filter_Changed" />
+            <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,8">
+                <ComboBox x:Name="StatusFilter" Width="110" Margin="0,0,6,0" SelectionChanged="Filter_Changed">
+                    <ComboBoxItem Content="all status" IsSelected="True" />
+                    <ComboBoxItem Content="open" />
+                    <ComboBoxItem Content="closed" />
+                    <ComboBoxItem Content="declined" />
+                </ComboBox>
+                <ComboBox x:Name="PriorityFilter" Width="100" Margin="0,0,6,0" SelectionChanged="Filter_Changed">
+                    <ComboBoxItem Content="all priority" IsSelected="True" />
+                    <ComboBoxItem Content="urgent" />
+                    <ComboBoxItem Content="high" />
+                    <ComboBoxItem Content="normal" />
+                    <ComboBoxItem Content="low" />
+                </ComboBox>
+                <CheckBox x:Name="ReadyFilter" Content="Ready only" VerticalAlignment="Center" Checked="Filter_Changed"
+                          Unchecked="Filter_Changed" />
+            </StackPanel>
+            <ListBox x:Name="IssueList" Grid.Row="2" SelectionChanged="IssueList_SelectionChanged"
+                     DisplayMemberPath="Title" />
+            <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,8,0,0">
+                <Button Content="New issue" Padding="10,5" Click="NewIssue_Click" />
+                <Button Content="Refresh" Padding="10,5" Margin="8,0,0,0" Click="Refresh_Click" />
+            </StackPanel>
+        </Grid>
+        <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Center" VerticalAlignment="Stretch" />
+        <Grid Grid.Column="2">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <TextBox x:Name="TitleBox" Grid.Row="0" FontSize="20" Padding="6" Margin="0,0,0,8" />
+            <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,8">
+                <TextBlock Text="Status" VerticalAlignment="Center" Margin="0,0,5,0" />
+                <ComboBox x:Name="StatusBox" Width="100" Margin="0,0,12,0">
+                    <ComboBoxItem Content="open" />
+                    <ComboBoxItem Content="closed" />
+                    <ComboBoxItem Content="declined" />
+                </ComboBox>
+                <TextBlock Text="Priority" VerticalAlignment="Center" Margin="0,0,5,0" />
+                <ComboBox x:Name="PriorityBox" Width="100" Margin="0,0,12,0">
+                    <ComboBoxItem Content="urgent" />
+                    <ComboBoxItem Content="high" />
+                    <ComboBoxItem Content="normal" />
+                    <ComboBoxItem Content="low" />
+                </ComboBox>
+                <CheckBox x:Name="ReadyBox" Content="Ready" VerticalAlignment="Center" />
+            </StackPanel>
+            <TextBox x:Name="TagsBox" Grid.Row="2" Padding="6" Margin="0,0,0,8"
+                     ToolTip="Comma-separated tags" />
+            <TextBox x:Name="BodyBox" Grid.Row="3" AcceptsReturn="True" AcceptsTab="True" TextWrapping="Wrap"
+                     VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                     FontFamily="Consolas" Padding="8" />
+            <TextBlock x:Name="MessageText" Grid.Row="4" Margin="0,8" TextWrapping="Wrap" />
+            <WrapPanel Grid.Row="5" HorizontalAlignment="Left">
+                <Button Content="Save" Padding="10,5" Margin="0,0,6,0" Click="Save_Click" />
+                <Button Content="Mark ready" Padding="10,5" Margin="0,0,6,0" Click="Ready_Click" />
+                <Button Content="Unready" Padding="10,5" Margin="0,0,6,0" Click="Unready_Click" />
+                <Button Content="Close" Padding="10,5" Margin="0,0,6,0" Click="Close_Click" />
+                <Button Content="Decline" Padding="10,5" Margin="0,0,6,0" Click="Decline_Click" />
+                <Button Content="Reopen" Padding="10,5" Click="Reopen_Click" />
+            </WrapPanel>
+        </Grid>
+    </Grid>
+</Window>
