@@ -9,6 +9,8 @@ dotnet publish src/OpenIssue.Cli/OpenIssue.Cli.csproj -c Release -r win-x64 --se
 dotnet publish src/OpenIssue.Desktop/OpenIssue.Desktop.csproj -c Release -r win-x64 --self-contained true --no-restore -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o artifacts/win-x64/desktop
 ```
 
+Install the locally packed tool with `dotnet tool install --global --add-source artifacts/packages OpenIssue.Tool --version 1.0.0`. Once published to a NuGet feed, install it with `dotnet tool install --global OpenIssue.Tool`.
+
 Keep the SDK pin, NuGet package lock files, and publish commands with release records so restore and packaging use the reviewed versions. The desktop and CLI share the same core and on-disk Markdown format. Verify both executables on a clean Windows machine with networking disabled after publishing.
 
 The core and CLI target `net10.0` and do not contain WPF dependencies. WPF is isolated in the Windows-only desktop project. This keeps a future UI replacement possible, but does not represent or promise a non-Windows desktop application. Evaluate any future frontend against the stable core/service and format before choosing a toolkit.

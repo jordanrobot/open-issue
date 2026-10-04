@@ -12,6 +12,13 @@ dotnet tool install --global OpenIssue.Tool
 
 The installed command is `issue`. Update it with `dotnet tool update --global OpenIssue.Tool`.
 
+To install the package built from this checkout:
+
+```sh
+dotnet pack src/OpenIssue.Cli/OpenIssue.Cli.csproj -c Release -o artifacts/packages
+dotnet tool install --global --add-source artifacts/packages OpenIssue.Tool --version 1.0.0
+```
+
 ## Initialize and use
 
 Run `issue init` from the directory that should own its issue project. You can optionally provide a directory: `issue init /path/to/project`.

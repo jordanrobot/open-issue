@@ -11,13 +11,13 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>issue</AssemblyName>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>issue</ToolCommandName>
     <PackageId>OpenIssue.Tool</PackageId>
     <Version>1.0.0</Version>
     <Authors>Open Issue contributors</Authors>
     <Description>Local-first Markdown issue and specification manager.</Description>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageTags>issue;markdown;offline</PackageTags>
     <RepositoryUrl>https://github.com/jordanrobot/free-issue</RepositoryUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>

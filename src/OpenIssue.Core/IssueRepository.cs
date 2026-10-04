@@ -31,10 +31,12 @@ public sealed class IssueRepository(string projectRoot)
             {
                 ProjectLocator.RejectLink(path);
                 var issue = ReadPath(path);
-                if (!long.TryParse(Path.GetFileNameWithoutExtension(path), NumberStyles.None,
-                        CultureInfo.InvariantCulture, out var fileId) || fileId != issue.Id)
+                var fileIdText = Path.GetFileNameWithoutExtension(path);
+                if (!long.TryParse(fileIdText, NumberStyles.None, CultureInfo.InvariantCulture, out var fileId) ||
+                    fileId != issue.Id ||
+                    !string.Equals(fileIdText, fileId.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal))
                 {
-                    throw new IssueException("The filename must match the numeric issue ID.");
+                    throw new IssueException("The filename must be the canonical numeric issue ID.");
                 }
 
                 issues.Add(issue);
@@ -65,6 +67,11 @@ public sealed class IssueRepository(string projectRoot)
                          .Distinct()))
         {
             diagnostics.Add(new IssueDiagnostic(GetIssuePath(cycleId), "Parent/child relationships contain a cycle."));
+        }
+
+        foreach (var cycleId in FindCycleIds(byId, issue => issue.Blocks))
+        {
+            diagnostics.Add(new IssueDiagnostic(GetIssuePath(cycleId), "Blocking relationships contain a cycle."));
         }
 
         return new IssueListResult(issues, diagnostics);

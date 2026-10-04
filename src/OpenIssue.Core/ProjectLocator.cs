@@ -116,8 +116,14 @@ public static class ProjectLocator
 
     internal static void RejectLink(string path)
     {
-        if ((File.Exists(path) || Directory.Exists(path)) &&
-            (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+        var isLink = new FileInfo(path).LinkTarget is not null ||
+                     new DirectoryInfo(path).LinkTarget is not null;
+        if (!isLink && (File.Exists(path) || Directory.Exists(path)))
+        {
+            isLink = (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
+        }
+
+        if (isLink)
         {
             throw new IssueException($"Symbolic links and reparse points are not supported: '{path}'.");
         }

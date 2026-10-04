@@ -4,6 +4,7 @@ var tests = new (string Name, Action Run)[]
 {
     ("project initialization and discovery", ProjectInitialization),
     ("nested projects are isolated", NestedProjectIsolation),
+    ("dangling project symlinks cannot fall through to a parent project", DanglingProjectLink),
     ("issue creation, listing, search, and Unicode", IssueOperations),
     ("numeric issue IDs are allocated without collisions", NumericIdAllocation),
     ("readiness and deterministic next selection", ReadinessAndNext),
@@ -43,9 +44,27 @@ static void ProjectInitialization()
     Throws<IssueException>(() => ProjectLocator.Initialize(project.Root));
     var config = File.ReadAllText(Path.Combine(project.Root, ".issues", "config.json"));
     True(config.Contains("\"formatVersion\": 1", StringComparison.Ordinal), "configuration formatVersion was not camel-cased");
+    Equal("1", File.ReadAllText(Path.Combine(project.Root, ".issues", "next-id")).Trim());
     File.WriteAllText(Path.Combine(project.Root, ".issues", "config.json"), "{\"formatVersion\":2}");
     Throws<IssueException>(() => ProjectLocator.Find(project.Root));
     True(!Directory.Exists(Path.Combine(project.Root, ".git")), "test project unexpectedly has Git metadata");
+}
+
+static void DanglingProjectLink()
+{
+    using var project = new TemporaryProject();
+    var child = Directory.CreateDirectory(Path.Combine(project.Root, "nested")).FullName;
+    try
+    {
+        Directory.CreateSymbolicLink(Path.Combine(child, ".issues"), Path.Combine(child, "missing-issues"));
+        Throws<IssueException>(() => ProjectLocator.Find(child));
+    }
+    catch (PlatformNotSupportedException)
+    {
+    }
+    catch (UnauthorizedAccessException)
+    {
+    }
 }
 
 static void NestedProjectIsolation()
@@ -332,7 +351,7 @@ static void Throws<T>(Action action) where T : Exception
 
 sealed class TemporaryProject : IDisposable
 {
-    public string Root { get; } = Path.Combine(Path.GetTempPath(), "free-issue-tests-" + Guid.NewGuid().ToString("N"));
+    public string Root { get; } = Path.Combine(Path.GetTempPath(), "open-issue-tests-" + Guid.NewGuid().ToString("N"));
     public IssueService Service { get; }
 
     public TemporaryProject()
