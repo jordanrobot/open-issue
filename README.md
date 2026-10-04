@@ -10,7 +10,7 @@ Requires the .NET 10 runtime. Install the CLI as a .NET global tool:
 dotnet tool install --global OpenIssue.Tool
 ```
 
-The installed command is `issue`. Update it with `dotnet tool update --global OpenIssue.Tool`.
+The installed command is `issue`. Update it with `dotnet tool update --global OpenIssue.Tool`. On Windows, `issue ui` opens the bundled desktop application; the UI requires the .NET 10 Desktop Runtime.
 
 To install the package built from this checkout:
 
@@ -18,7 +18,7 @@ To install the package built from this checkout:
 .\scripts\build-install.ps1
 ```
 
-This packs the CLI to `artifacts/packages` and installs it globally as `issue`. To pack and install manually:
+This packs the CLI and Windows desktop application to `artifacts/packages`, then installs the tool globally as `issue`. Pack the tool on Windows. To pack and install manually:
 
 ```powershell
 dotnet pack src/OpenIssue.Cli/OpenIssue.Cli.csproj -c Release -o artifacts/packages
@@ -34,6 +34,7 @@ Run `issue init` from the directory that should own its issue project. You can o
 ```sh
 cd /path/to/project
 issue init
+issue ui
 issue new --title "Document the API" --body-file issue.md
 issue list
 issue show 1 --json

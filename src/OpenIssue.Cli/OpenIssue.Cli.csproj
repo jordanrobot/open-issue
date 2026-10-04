@@ -30,4 +30,24 @@
     <None Include="../../README.md" Pack="true" PackagePath="/" />
   </ItemGroup>
 
+  <PropertyGroup>
+    <DesktopProjectPath>$(MSBuildThisFileDirectory)..\OpenIssue.Desktop\OpenIssue.Desktop.csproj</DesktopProjectPath>
+    <DesktopOutputDirectory>$(MSBuildThisFileDirectory)..\..\artifacts\bin\OpenIssue.Desktop\$(Configuration)\net10.0-windows\</DesktopOutputDirectory>
+  </PropertyGroup>
+
+  <Target Name="BuildDesktopApplicationForToolPackage" BeforeTargets="_GetPackageFiles">
+    <Error Condition="'$(OS)' != 'Windows_NT'"
+           Text="The OpenIssue.Tool package includes a Windows desktop application and must be packed on Windows." />
+    <MSBuild Projects="$(DesktopProjectPath)"
+             Targets="Restore;Build"
+             Properties="Configuration=$(Configuration);RestoreLockedMode=true" />
+    <Error Condition="!Exists('$(DesktopOutputDirectory)OpenIssue.Desktop.exe')"
+           Text="The Windows desktop application was not built to '$(DesktopOutputDirectory)'." />
+    <ItemGroup>
+      <None Include="$(DesktopOutputDirectory)*"
+            Pack="true"
+            PackagePath="tools/net10.0/any/desktop/" />
+    </ItemGroup>
+  </Target>
+
 </Project>

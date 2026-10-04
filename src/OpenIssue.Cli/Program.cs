@@ -32,6 +32,10 @@ internal static class Cli
         }, parse.GetValue(initJson)));
         root.Add(init);
 
+        var ui = new Command("ui", "Open the Windows desktop application.");
+        ui.SetAction(_ => Run(LaunchDesktopUi, json: false));
+        root.Add(ui);
+
         var title = new Option<string?>("--title") { Description = "Issue title." };
         var body = new Option<string?>("--body") { Description = "Issue body as Markdown text." };
         var bodyFile = new Option<string?>("--body-file") { Description = "Read Markdown from a file, or '-' for stdin." };
@@ -229,6 +233,7 @@ internal static class Cli
 
                 Commands:
                   issue init [DIRECTORY]
+                  issue ui
                   issue new --title TITLE (--body TEXT | --body-file FILE)
                   issue list [--status VALUE] [--tag TAG] [--priority VALUE] [--ready true|false] [--json]
                   issue show ID [--json]
@@ -351,6 +356,41 @@ internal static class Cli
     }
 
     private static IssueService GetService() => new(new IssueRepository(ProjectLocator.Find()));
+
+    private static int LaunchDesktopUi()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new IssueException("The desktop UI is only available on Windows.");
+        }
+
+        var executablePath = Path.Combine(AppContext.BaseDirectory, "desktop", "OpenIssue.Desktop.exe");
+        if (!File.Exists(executablePath))
+        {
+            throw new IssueException(
+                $"The Windows desktop application was not found at '{executablePath}'. Reinstall OpenIssue.Tool to restore it.");
+        }
+
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo
+            {
+                FileName = executablePath,
+                WorkingDirectory = Environment.CurrentDirectory,
+                UseShellExecute = true
+            });
+            if (process is null)
+            {
+                throw new IssueException($"Could not start the Windows desktop application at '{executablePath}'.");
+            }
+        }
+        catch (System.ComponentModel.Win32Exception exception)
+        {
+            throw new IssueException($"Could not open the Windows desktop application: {exception.Message}");
+        }
+
+        return 0;
+    }
 
     private static async Task<string> ReadBodyAsync(string? body, string? bodyFile)
     {

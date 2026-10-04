@@ -1,6 +1,6 @@
 # Windows release and future platforms
 
-Release artifacts are self-contained Windows x64 executables. Build them on a connected build host, then copy the publish directories to the target machine; running the release does not require an account, Git, .NET installation, or network access.
+Standalone release artifacts are self-contained Windows x64 executables. Build them on a connected Windows host, then copy the publish directories to the target machine; running those standalone releases does not require an account, Git, .NET installation, or network access.
 
 ```powershell
 dotnet restore OpenIssue.slnx --runtime win-x64 --locked-mode
@@ -8,6 +8,8 @@ dotnet pack src/OpenIssue.Cli/OpenIssue.Cli.csproj -c Release --no-restore -o ar
 dotnet publish src/OpenIssue.Cli/OpenIssue.Cli.csproj -c Release -r win-x64 --self-contained true --no-restore -p:PublishSingleFile=true -o artifacts/win-x64/cli
 dotnet publish src/OpenIssue.Desktop/OpenIssue.Desktop.csproj -c Release -r win-x64 --self-contained true --no-restore -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o artifacts/win-x64/desktop
 ```
+
+Packing the CLI also builds the framework-dependent Windows desktop application and includes it in the tool package. Installed tools expose it with `issue ui`; the command requires the .NET 10 Desktop Runtime. The separate desktop publish command above remains self-contained.
 
 Install the locally packed tool with `dotnet tool install --global --configfile scripts/NuGet.Config OpenIssue.Tool --version 1.0.0`. The config maps `OpenIssue.Tool` to the local `artifacts/packages` feed; this avoids `--add-source`, which NuGet does not allow when package source mapping is enabled. Once published to a NuGet feed, install it with `dotnet tool install --global OpenIssue.Tool`.
 
