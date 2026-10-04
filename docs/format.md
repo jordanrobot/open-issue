@@ -56,20 +56,10 @@ children: []
 related: []
 blocks: []
 ---
-# Context
-
-Why this work is useful.
-
-# Desired outcome
-
-What should be true when it is complete.
-
-# Acceptance criteria
-
-- [ ] Public operations are documented.
+Document the public API for consumers.
 ```
 
-New issues start as drafts (`draft: true`). Schema 2 files with `ready` are read with the inverse value and upgraded to schema 3 on their next write. In the desktop editor, unchecking Draft marks an issue ready. Context, Desired outcome, and Acceptance criteria are starter headings, not required for a draft. A non-draft issue must be open and have a nonempty Acceptance criteria section. Readiness authorizes selection by `next`, not autonomous implementation.
+New issues start as drafts (`draft: true`) with an empty body by default. Schema 2 files with `ready` are read with the inverse value and upgraded to schema 3 on their next write. In the desktop editor, unchecking Draft marks an issue ready. Issue bodies are freeform Markdown; no headings, sections, or body content are required. A ready issue must be open. Readiness authorizes selection by `next`, not autonomous implementation.
 
 ## Reads and writes
 

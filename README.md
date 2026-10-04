@@ -48,6 +48,8 @@ JSON read commands write machine-readable output to stdout; errors have `error.c
 
 ## Build and verify
 
+Build outputs and intermediates are kept under `artifacts/` (including per-project `bin/` and `obj/` trees and NuGet packages).
+
 ```sh
 dotnet build OpenIssue.slnx
 dotnet run --project tests/OpenIssue.Tests
@@ -69,6 +71,6 @@ The CLI and core target portable .NET 10. The Windows desktop app uses WPF and i
 
 ## Format and agent use
 
-See [the file format and storage contract](docs/format.md), [safe CLI/agent workflows](docs/agent-usage.md), [Windows release instructions](docs/release.md), and the [starter issue template](docs/starter-issue.md).
+See [the file format and storage contract](docs/format.md), [safe CLI/agent workflows](docs/agent-usage.md), [Windows release instructions](docs/release.md), and [issue body guidance](docs/starter-issue.md).
 
 Back up or move a project by copying its `.issues` directory. Numeric issue IDs are allocated within that project, immutable, and used for references.
