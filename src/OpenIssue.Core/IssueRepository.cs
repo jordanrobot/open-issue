@@ -150,6 +150,7 @@ public sealed class IssueRepository(string projectRoot)
                 ValidateReferences(issue, all);
             }
 
+            issue.CreatedBy = current.CreatedBy;
             issue.CreatedAt = current.CreatedAt;
             issue.UpdatedAt = DateTimeOffset.UtcNow;
             issue.Frontmatter = current.Frontmatter;
@@ -380,6 +381,7 @@ public sealed class IssueRepository(string projectRoot)
             var draft = schema == 2 ? !ReadBool(values, "ready") : ReadBool(values, "draft");
             var created = ReadDate(values, "created_at");
             var updated = ReadDate(values, "updated_at");
+            var createdBy = values.ContainsKey("created_by") ? ReadString(values, "created_by") : string.Empty;
             var tags = ReadStringList(values, "tags");
             var parents = ReadOptionalLongList(values, "parents");
             var children = ReadOptionalLongList(values, "children");
@@ -397,6 +399,7 @@ public sealed class IssueRepository(string projectRoot)
                 Status = status,
                 Priority = priority,
                 Draft = draft,
+                CreatedBy = createdBy,
                 CreatedAt = created,
                 UpdatedAt = updated,
                 Tags = tags,
@@ -433,6 +436,7 @@ public sealed class IssueRepository(string projectRoot)
         Put(map, "draft", new YamlScalarNode(issue.Draft ? "true" : "false"));
         Put(map, "priority", new YamlScalarNode(issue.Priority.ToString().ToLowerInvariant()));
         Put(map, "tags", new YamlSequenceNode(issue.Tags.Select(tag => new YamlScalarNode(tag))));
+        Put(map, "created_by", new YamlScalarNode(issue.CreatedBy));
         Put(map, "created_at", new YamlScalarNode(issue.CreatedAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)));
         Put(map, "updated_at", new YamlScalarNode(issue.UpdatedAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)));
         Put(map, "parents", NumberSequence(issue.Parents));

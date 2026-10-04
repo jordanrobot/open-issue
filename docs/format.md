@@ -28,6 +28,7 @@ Each issue is stored as `.issues/issues/<id>.md`, UTF-8 Markdown with a YAML fro
 | `draft` | boolean | Required; newly created issues default to true. |
 | `priority` | string | `low`, `normal`, `high`, or `urgent`. |
 | `tags` | list of strings | Defaults to empty; entries must be nonempty and unique ignoring case. |
+| `created_by` | string | OS username captured when created; absent on older issues. |
 | `created_at` | timestamp | UTC ISO 8601; immutable. |
 | `updated_at` | timestamp | UTC ISO 8601; refreshed on edit. |
 | `parents` | list of integers | IDs of parent issues. |
@@ -49,6 +50,7 @@ draft: true
 priority: normal
 tags:
 - docs
+created_by: example-user
 created_at: "2026-10-03T20:00:00.0000000+00:00"
 updated_at: "2026-10-03T20:00:00.0000000+00:00"
 parents: []
@@ -60,6 +62,8 @@ Document the public API for consumers.
 ```
 
 New issues start as drafts (`draft: true`) with an empty body by default. Schema 2 files with `ready` are read with the inverse value and upgraded to schema 3 on their next write. In the desktop editor, unchecking Draft marks an issue ready. Issue bodies are freeform Markdown; no headings, sections, or body content are required. A ready issue must be open. Readiness authorizes selection by `next`, not autonomous implementation.
+
+New issues record the creating operating-system username in `created_by`; existing issues without that field have unknown attribution. The desktop editor shows the creator plus creation and last-edit timestamps in the system's local time zone, with the offset displayed. Timestamps remain UTC ISO 8601 in frontmatter.
 
 ## Reads and writes
 

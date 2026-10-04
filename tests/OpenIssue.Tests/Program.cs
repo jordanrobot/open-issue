@@ -6,6 +6,7 @@ var tests = new (string Name, Action Run)[]
     ("nested projects are isolated", NestedProjectIsolation),
     ("dangling project symlinks cannot fall through to a parent project", DanglingProjectLink),
     ("issue creation, listing, search, and Unicode", IssueOperations),
+    ("creator and timestamp metadata is persisted and immutable", IssueMetadata),
     ("new issues are drafts by default", DraftByDefault),
     ("legacy ready values map to draft values", LegacyReadyMetadata),
     ("numeric issue IDs are allocated without collisions", NumericIdAllocation),
@@ -102,6 +103,41 @@ static void IssueOperations()
     Equal(child.Id, service.Show(issue.Id.ToString()).Children.Single());
     service.Edit(child.Id.ToString(), parents: [issue.Id]);
     Equal(issue.Id, service.Show(child.Id.ToString()).Parents.Single());
+}
+
+static void IssueMetadata()
+{
+    using var project = new TemporaryProject();
+    var service = project.Service;
+    var beforeCreate = DateTimeOffset.UtcNow;
+    var issue = service.Create("Metadata", "");
+    var afterCreate = DateTimeOffset.UtcNow;
+
+    Equal(Environment.UserName, issue.CreatedBy);
+    True(issue.CreatedAt >= beforeCreate && issue.CreatedAt <= afterCreate,
+        "creation timestamp was not captured");
+    Equal(issue.CreatedAt, issue.UpdatedAt);
+
+    var persisted = service.Show(issue.Id.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    Equal(issue.CreatedBy, persisted.CreatedBy);
+    Equal(issue.CreatedAt, persisted.CreatedAt);
+    Equal(issue.UpdatedAt, persisted.UpdatedAt);
+
+    var beforeEdit = DateTimeOffset.UtcNow;
+    var edited = service.Edit(issue.Id.ToString(System.Globalization.CultureInfo.InvariantCulture), title: "Edited");
+    var afterEdit = DateTimeOffset.UtcNow;
+    Equal(issue.CreatedBy, edited.CreatedBy);
+    Equal(issue.CreatedAt, edited.CreatedAt);
+    True(edited.UpdatedAt >= beforeEdit && edited.UpdatedAt <= afterEdit,
+        "last edit timestamp was not captured");
+
+    var reloaded = service.Show(issue.Id.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    Equal(edited.UpdatedAt, reloaded.UpdatedAt);
+
+    var changedCreator = service.Repository.Read(issue.Id);
+    changedCreator.CreatedBy = "someone-else";
+    var saved = service.Repository.Update(changedCreator, changedCreator.Revision);
+    Equal(issue.CreatedBy, saved.CreatedBy);
 }
 
 static void DraftByDefault()

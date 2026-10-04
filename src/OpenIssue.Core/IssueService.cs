@@ -63,6 +63,7 @@ public sealed class IssueService(IssueRepository repository)
             Draft = true,
             Priority = priority,
             Tags = tags?.ToList() ?? [],
+            CreatedBy = Environment.UserName,
             CreatedAt = now,
             UpdatedAt = now
         });

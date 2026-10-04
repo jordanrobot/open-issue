@@ -385,6 +385,7 @@ public partial class MainWindow : Window
         _current = issue;
         _knownRevisions[issue.Id] = issue.Revision;
         ReplaceIssueInList(issue);
+        MetadataText.Text = FormatIssueMetadata(issue);
 
         if (DraftBox.IsChecked == issue.Draft)
         {
@@ -459,6 +460,7 @@ public partial class MainWindow : Window
                 _knownRevisions[issue.Id] = issue.Revision;
             }
 
+            MetadataText.Text = issue is null ? string.Empty : FormatIssueMetadata(issue);
             TitleBox.Text = issue?.Title ?? "";
             BodyBox.Text = issue?.Body ?? "";
             TagsBox.Text = issue is null ? "" : string.Join(", ", issue.Tags);
@@ -471,6 +473,14 @@ public partial class MainWindow : Window
         {
             _loading = false;
         }
+    }
+
+    private static string FormatIssueMetadata(Issue issue)
+    {
+        var createdBy = string.IsNullOrWhiteSpace(issue.CreatedBy) ? "Unknown" : issue.CreatedBy;
+        var createdAt = issue.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture);
+        var updatedAt = issue.UpdatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture);
+        return $"Created by {createdBy} | Created {createdAt} | Last edited {updatedAt}";
     }
 
     private void ClearEditor() => LoadIssue(null);

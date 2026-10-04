@@ -23,6 +23,7 @@ public sealed class Issue
     public bool Draft { get; set; } = true;
     public IssuePriority Priority { get; set; } = IssuePriority.Normal;
     public List<string> Tags { get; set; } = [];
+    public string CreatedBy { get; set; } = string.Empty;
     public required DateTimeOffset CreatedAt { get; set; }
     public required DateTimeOffset UpdatedAt { get; set; }
     public List<long> Parents { get; set; } = [];

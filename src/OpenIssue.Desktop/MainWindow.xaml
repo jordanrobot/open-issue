@@ -41,8 +41,17 @@
                 <CheckBox x:Name="ReadyFilter" Content="Ready only" VerticalAlignment="Center" Checked="Filter_Changed"
                           Unchecked="Filter_Changed" />
             </StackPanel>
-            <ListBox x:Name="IssueList" Grid.Row="2" SelectionChanged="IssueList_SelectionChanged"
-                     DisplayMemberPath="Title">
+            <ListBox x:Name="IssueList" Grid.Row="2" SelectionChanged="IssueList_SelectionChanged">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <TextBlock TextTrimming="CharacterEllipsis">
+                            <Run Text="#" />
+                            <Run Text="{Binding Id}" />
+                            <Run Text=": " />
+                            <Run Text="{Binding Title}" />
+                        </TextBlock>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
                 <ListBox.ItemContainerStyle>
                     <Style TargetType="ListBoxItem">
                         <Setter Property="ContextMenu" Value="{StaticResource IssueContextMenu}" />
@@ -60,12 +69,14 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
             <TextBox x:Name="TitleBox" Grid.Row="0" FontSize="20" Padding="6" Margin="0,0,0,8"
                      TextChanged="Editor_Changed" />
-            <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,8">
+            <TextBlock x:Name="MetadataText" Grid.Row="1" Margin="0,0,0,8" TextWrapping="Wrap" />
+            <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,8">
                 <TextBlock Text="Status" VerticalAlignment="Center" Margin="0,0,5,0" />
                 <ComboBox x:Name="StatusBox" Width="100" Margin="0,0,12,0" SelectionChanged="Editor_Changed">
                     <ComboBoxItem Content="open" />
@@ -82,12 +93,12 @@
                 <CheckBox x:Name="DraftBox" Content="Draft" IsChecked="True" VerticalAlignment="Center"
                           Checked="Editor_Changed" Unchecked="Editor_Changed" />
             </StackPanel>
-            <TextBox x:Name="TagsBox" Grid.Row="2" Padding="6" Margin="0,0,0,8"
+            <TextBox x:Name="TagsBox" Grid.Row="3" Padding="6" Margin="0,0,0,8"
                      ToolTip="Comma-separated tags" TextChanged="Editor_Changed" />
-            <TextBox x:Name="BodyBox" Grid.Row="3" AcceptsReturn="True" AcceptsTab="True" TextWrapping="Wrap"
+            <TextBox x:Name="BodyBox" Grid.Row="4" AcceptsReturn="True" AcceptsTab="True" TextWrapping="Wrap"
                      VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
                      FontFamily="Consolas" Padding="8" TextChanged="Editor_Changed" />
-            <TextBlock x:Name="MessageText" Grid.Row="4" Margin="0,8" TextWrapping="Wrap" />
+            <TextBlock x:Name="MessageText" Grid.Row="5" Margin="0,8" TextWrapping="Wrap" />
         </Grid>
     </Grid>
 </Window>
