@@ -35,7 +35,9 @@ public sealed class Issue
     internal string LineEnding { get; set; } = "\n";
 }
 
-public sealed class IssueException(string message) : Exception(message);
+public class IssueException(string message) : Exception(message);
+
+public sealed class IssueConflictException(string message) : IssueException(message);
 
 public sealed record IssueDiagnostic(string Path, string Message);
 

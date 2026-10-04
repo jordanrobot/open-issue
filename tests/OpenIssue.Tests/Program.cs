@@ -12,6 +12,7 @@ var tests = new (string Name, Action Run)[]
     ("readiness and deterministic next selection", ReadinessAndNext),
     ("unknown metadata, body, and line-ending preservation", Preservation),
     ("stale revisions do not overwrite edits", RevisionConflict),
+    ("service edits reject stale revisions", ServiceRevisionConflict),
     ("concurrent writers detect conflicts", ConcurrentWriters),
     ("concurrent relationship changes cannot create cycles", ConcurrentRelationshipChanges),
     ("malformed files do not hide valid issues", InvalidFiles),
@@ -235,6 +236,24 @@ static void RevisionConflict()
     stale.Title = "Stale write";
     Throws<IssueException>(() => service.Repository.Update(stale, stale.Revision));
     Equal("First write", service.Show(issue.Id.ToString()).Title);
+}
+
+static void ServiceRevisionConflict()
+{
+    using var project = new TemporaryProject();
+    var service = project.Service;
+    var issue = service.Create("Original", "Original body");
+    var staleRevision = issue.Revision;
+    var externalEdit = service.Resolve(issue.Id.ToString());
+    externalEdit.Body = "External body";
+    service.Repository.Update(externalEdit, externalEdit.Revision);
+
+    Throws<IssueConflictException>(() =>
+        service.Edit(issue.Id.ToString(), body: "Local body", expectedRevision: staleRevision));
+
+    var saved = service.Resolve(issue.Id.ToString());
+    Equal("Original", saved.Title);
+    Equal("External body", saved.Body);
 }
 
 static void ConcurrentWriters()

@@ -136,7 +136,7 @@ public sealed class IssueRepository(string projectRoot)
             var current = ReadPath(path);
             if (!string.Equals(current.Revision, expectedRevision, StringComparison.Ordinal))
             {
-                throw new IssueException($"Issue '{issue.Id}' changed since it was read. Reload it and retry.");
+                throw new IssueConflictException($"Issue '{issue.Id}' changed since it was read. Reload it and retry.");
             }
 
             var relationshipsChanged = !current.Parents.SequenceEqual(issue.Parents) ||
@@ -157,7 +157,7 @@ public sealed class IssueRepository(string projectRoot)
             var content = Serialize(issue);
             if (!string.Equals(ReadPath(path).Revision, expectedRevision, StringComparison.Ordinal))
             {
-                throw new IssueException($"Issue '{issue.Id}' changed since it was read while the update was being prepared. Reload it and retry.");
+                throw new IssueConflictException($"Issue '{issue.Id}' changed since it was read while the update was being prepared. Reload it and retry.");
             }
 
             WriteAtomically(path, content, overwrite: true, expectedRevision);
@@ -697,7 +697,7 @@ public sealed class IssueRepository(string projectRoot)
                 if (!File.Exists(path) ||
                     !string.Equals(ReadPath(path).Revision, expectedRevision, StringComparison.Ordinal))
                 {
-                    throw new IssueException("The issue changed since it was read; the update was not written.");
+                    throw new IssueConflictException("The issue changed since it was read; the update was not written.");
                 }
             }
 

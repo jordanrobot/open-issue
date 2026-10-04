@@ -74,7 +74,8 @@ public sealed class IssueService(IssueRepository repository)
         IEnumerable<long>? related = null,
         IEnumerable<long>? blocks = null,
         IssueStatus? status = null,
-        bool? draft = null)
+        bool? draft = null,
+        string? expectedRevision = null)
     {
         var current = Resolve(idOrPrefix);
         if (title is not null)
@@ -133,7 +134,7 @@ public sealed class IssueService(IssueRepository repository)
         }
 
         current.UpdatedAt = DateTimeOffset.UtcNow;
-        return Repository.Update(current, current.Revision);
+        return Repository.Update(current, expectedRevision ?? current.Revision);
     }
 
     public Issue SetStatus(string idOrPrefix, IssueStatus status)

@@ -14,13 +14,21 @@ public partial class MainWindow : Window
 {
     private readonly ObservableCollection<Issue> _issues = [];
     private readonly DispatcherTimer _refreshTimer = new() { Interval = TimeSpan.FromMilliseconds(500) };
-    private readonly DispatcherTimer _saveTimer = new() { Interval = TimeSpan.FromMilliseconds(500) };
+    private readonly DispatcherTimer _saveTimer = new() { Interval = TimeSpan.FromMilliseconds(100) };
     private readonly Dictionary<long, string> _knownRevisions = [];
     private IssueService? _service;
     private Issue? _current;
     private FileSystemWatcher? _watcher;
     private bool _loading;
     private bool _refreshing;
+
+    private enum SaveResult
+    {
+        Saved,
+        Reloaded,
+        Cancelled,
+        Failed
+    }
 
     public MainWindow()
     {
@@ -137,11 +145,11 @@ public partial class MainWindow : Window
         }
     }
 
-    private void RefreshList()
+    private bool RefreshList(bool preserveCurrentEditor = false)
     {
-        if (_service is null || _refreshing || !ConfirmLeaveCurrent())
+        if (_service is null || _refreshing || (!preserveCurrentEditor && !ConfirmLeaveCurrent()))
         {
-            return;
+            return false;
         }
 
         _refreshing = true;
@@ -171,15 +179,28 @@ public partial class MainWindow : Window
 
             var selected = _current is null ? null : _issues.FirstOrDefault(issue => issue.Id == _current.Id);
             IssueList.SelectedItem = selected ?? _issues.FirstOrDefault();
-            LoadIssue(IssueList.SelectedItem as Issue);
+            var selectedIssue = IssueList.SelectedItem as Issue;
+            if (preserveCurrentEditor &&
+                _current is not null &&
+                selectedIssue?.Id == _current.Id &&
+                string.Equals(selectedIssue.Revision, _current.Revision, StringComparison.Ordinal))
+            {
+                _current = selectedIssue;
+            }
+            else
+            {
+                LoadIssue(selectedIssue);
+            }
 
             MessageText.Text = result.Diagnostics.Count == 0
                 ? $"Loaded {_issues.Count} issue(s)."
                 : string.Join(Environment.NewLine, result.Diagnostics.Select(diagnostic => $"{diagnostic.Path}: {diagnostic.Message}"));
+            return true;
         }
         catch (Exception exception) when (exception is IssueException or IOException or UnauthorizedAccessException)
         {
             MessageText.Text = exception.Message;
+            return false;
         }
         finally
         {
@@ -195,63 +216,237 @@ public partial class MainWindow : Window
             return true;
         }
 
-        if (SaveCurrent())
+        var saveResult = SaveCurrent(refreshIssueList: false);
+        if (saveResult is SaveResult.Saved or SaveResult.Reloaded)
         {
             return true;
         }
 
+        if (saveResult == SaveResult.Cancelled)
+        {
+            return false;
+        }
+
         var answer = MessageBox.Show(this,
             $"{MessageText.Text}{Environment.NewLine}{Environment.NewLine}Discard unsaved changes and continue?",
-            "Autosave failed", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            "Autosave failed", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
         if (answer != MessageBoxResult.Yes)
         {
             return false;
         }
 
-        LoadIssue(_current);
-        return true;
+        return ReloadCurrentIssue();
     }
 
     private bool IsDirty() =>
         _current is not null &&
         (TitleBox.Text != _current.Title ||
          BodyBox.Text != _current.Body ||
-         TagsBox.Text != string.Join(", ", _current.Tags) ||
+         !EditorTags().SequenceEqual(_current.Tags, StringComparer.Ordinal) ||
          Selected(StatusBox) != _current.Status.ToString().ToLowerInvariant() ||
          Selected(PriorityBox) != _current.Priority.ToString().ToLowerInvariant() ||
          DraftBox.IsChecked != _current.Draft);
 
-    private bool SaveCurrent()
+    private SaveResult SaveCurrent(bool refreshIssueList = true)
     {
         _saveTimer.Stop();
-        if (_service is null || _current is null)
+        var service = _service;
+        var current = _current;
+        if (service is null || current is null)
         {
-            return false;
+            return SaveResult.Failed;
         }
 
         if (!IsDirty())
         {
             MessageText.Text = "All changes are saved.";
-            return true;
+            return SaveResult.Saved;
+        }
+
+        var issueId = current.Id.ToString(CultureInfo.InvariantCulture);
+        var expectedRevision = current.Revision;
+        var title = TitleBox.Text;
+        var body = BodyBox.Text;
+        var priority = ParsePriority(Selected(PriorityBox));
+        var tags = EditorTags();
+        var status = ParseStatus(Selected(StatusBox));
+        var draft = DraftBox.IsChecked != false;
+
+        while (true)
+        {
+            try
+            {
+                var saved = service.Edit(issueId, title, body, priority, tags,
+                    status: status, draft: draft, expectedRevision: expectedRevision);
+                TrackSavedIssue(saved);
+
+                if (refreshIssueList)
+                {
+                    if (RefreshList(preserveCurrentEditor: true))
+                    {
+                        MessageText.Text = $"Changes saved automatically. {MessageText.Text}";
+                    }
+                    else
+                    {
+                        MessageText.Text = $"Changes saved automatically, but the issue list could not be refreshed: {MessageText.Text}";
+                    }
+                }
+                else
+                {
+                    MessageText.Text = "Changes saved automatically.";
+                }
+
+                return SaveResult.Saved;
+            }
+            catch (IssueConflictException exception)
+            {
+                Issue latest;
+                try
+                {
+                    latest = service.Resolve(issueId);
+                }
+                catch (Exception readException) when (readException is IssueException or IOException or UnauthorizedAccessException)
+                {
+                    MessageText.Text = $"Autosave failed: {exception.Message} Latest version could not be loaded: {readException.Message}";
+                    return SaveResult.Failed;
+                }
+
+                if (string.Equals(latest.Revision, expectedRevision, StringComparison.Ordinal))
+                {
+                    MessageText.Text = $"Autosave failed: {exception.Message}";
+                    return SaveResult.Failed;
+                }
+
+                var answer = MessageBox.Show(this,
+                    $"Issue {latest.Id} was changed by another editor while you have unsaved changes.{Environment.NewLine}{Environment.NewLine}" +
+                    "Yes: overwrite the newer version with your edits. Newer title, body, status, priority, tags, or draft changes may be lost." +
+                    $"{Environment.NewLine}No: discard your edits and load the newer version." +
+                    $"{Environment.NewLine}Cancel: keep editing without saving.",
+                    "Resolve edit conflict", MessageBoxButton.YesNoCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel);
+
+                if (answer == MessageBoxResult.Yes)
+                {
+                    expectedRevision = latest.Revision;
+                    _current = latest;
+                    _knownRevisions[latest.Id] = latest.Revision;
+                    ReplaceIssueInList(latest);
+                    continue;
+                }
+
+                if (answer == MessageBoxResult.No)
+                {
+                    ReplaceIssueInList(latest);
+                    LoadIssue(latest);
+                    if (refreshIssueList)
+                    {
+                        RefreshList(preserveCurrentEditor: true);
+                    }
+
+                    MessageText.Text = "Loaded the newer version; your unsaved changes were discarded.";
+                    return SaveResult.Reloaded;
+                }
+
+                MessageText.Text = "The issue changed elsewhere. Your edits remain on screen and were not saved.";
+                return SaveResult.Cancelled;
+            }
+            catch (Exception exception) when (exception is IssueException or IOException or UnauthorizedAccessException)
+            {
+                MessageText.Text = $"Autosave failed: {exception.Message}";
+                return SaveResult.Failed;
+            }
+        }
+    }
+
+    private bool ReloadCurrentIssue()
+    {
+        var service = _service;
+        var current = _current;
+        if (service is null || current is null)
+        {
+            return false;
         }
 
         try
         {
-            _current = _service.Edit(_current.Id.ToString(), TitleBox.Text, BodyBox.Text,
-                ParsePriority(Selected(PriorityBox)),
-                TagsBox.Text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
-                status: ParseStatus(Selected(StatusBox)),
-                draft: DraftBox.IsChecked != false);
-            LoadIssue(_current);
-            MessageText.Text = "Changes saved automatically.";
+            var latest = service.Resolve(current.Id.ToString(CultureInfo.InvariantCulture));
+            ReplaceIssueInList(latest);
+            LoadIssue(latest);
             return true;
         }
         catch (Exception exception) when (exception is IssueException or IOException or UnauthorizedAccessException)
         {
-            MessageText.Text = $"Autosave failed: {exception.Message}";
+            MessageText.Text = $"Cannot reload issue: {exception.Message}";
             return false;
         }
     }
+
+    private void TrackSavedIssue(Issue issue)
+    {
+        _current = issue;
+        _knownRevisions[issue.Id] = issue.Revision;
+        ReplaceIssueInList(issue);
+
+        if (DraftBox.IsChecked == issue.Draft)
+        {
+            return;
+        }
+
+        var wasLoading = _loading;
+        _loading = true;
+        try
+        {
+            DraftBox.IsChecked = issue.Draft;
+        }
+        finally
+        {
+            _loading = wasLoading;
+        }
+    }
+
+    private void ReplaceIssueInList(Issue issue)
+    {
+        var existing = _issues.FirstOrDefault(candidate => candidate.Id == issue.Id);
+        if (existing is null)
+        {
+            return;
+        }
+
+        var index = _issues.IndexOf(existing);
+        var wasSelected = IssueList.SelectedItem is Issue selected && selected.Id == issue.Id;
+        var wasLoading = _loading;
+        _loading = true;
+        try
+        {
+            _issues[index] = issue;
+            if (wasSelected)
+            {
+                IssueList.SelectedItem = issue;
+            }
+        }
+        finally
+        {
+            _loading = wasLoading;
+        }
+    }
+
+    private void RestoreCurrentSelection()
+    {
+        var wasLoading = _loading;
+        _loading = true;
+        try
+        {
+            IssueList.SelectedItem = _current is null
+                ? null
+                : _issues.FirstOrDefault(issue => issue.Id == _current.Id);
+        }
+        finally
+        {
+            _loading = wasLoading;
+        }
+    }
+
+    private string[] EditorTags() =>
+        TagsBox.Text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     private void LoadIssue(Issue? issue)
     {
@@ -300,13 +495,27 @@ public partial class MainWindow : Window
         var previous = _current;
         if (previous is not null && previous.Id != issue.Id && !ConfirmLeaveCurrent())
         {
-            _loading = true;
-            IssueList.SelectedItem = _issues.FirstOrDefault(item => item.Id == previous.Id);
-            _loading = false;
+            RestoreCurrentSelection();
             return;
         }
 
-        LoadIssue(issue);
+        if (_service is null)
+        {
+            LoadIssue(issue);
+            return;
+        }
+
+        try
+        {
+            var latest = _service.Resolve(issue.Id.ToString(CultureInfo.InvariantCulture));
+            ReplaceIssueInList(latest);
+            LoadIssue(latest);
+        }
+        catch (Exception exception) when (exception is IssueException or IOException or UnauthorizedAccessException)
+        {
+            MessageText.Text = $"Cannot load issue: {exception.Message}";
+            RestoreCurrentSelection();
+        }
     }
 
     private void Filter_Changed(object sender, RoutedEventArgs e)
