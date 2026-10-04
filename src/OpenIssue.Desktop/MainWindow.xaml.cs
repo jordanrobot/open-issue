@@ -341,68 +341,6 @@ public partial class MainWindow : Window
         _saveTimer.Start();
     }
 
-    private void Ready_Click(object sender, RoutedEventArgs e)
-    {
-        if (_service is null || _current is null || !SaveCurrent())
-        {
-            return;
-        }
-
-        try
-        {
-            _current = _service.SetDraft(_current.Id.ToString(), draft: false);
-            LoadIssue(_current);
-            RefreshList();
-        }
-        catch (IssueException exception)
-        {
-            MessageBox.Show(this, exception.Message, "Cannot mark ready", MessageBoxButton.OK, MessageBoxImage.Warning);
-        }
-    }
-
-    private void Draft_Click(object sender, RoutedEventArgs e) => SetDraft(draft: true);
-    private void Close_Click(object sender, RoutedEventArgs e) => SetStatus(IssueStatus.Closed);
-    private void Decline_Click(object sender, RoutedEventArgs e) => SetStatus(IssueStatus.Declined);
-    private void Reopen_Click(object sender, RoutedEventArgs e) => SetStatus(IssueStatus.Open);
-
-    private void SetDraft(bool draft)
-    {
-        if (_service is null || _current is null || !SaveCurrent())
-        {
-            return;
-        }
-
-        try
-        {
-            _current = _service.SetDraft(_current.Id.ToString(), draft);
-            LoadIssue(_current);
-            RefreshList();
-        }
-        catch (IssueException exception)
-        {
-            MessageBox.Show(this, exception.Message, "Cannot update issue", MessageBoxButton.OK, MessageBoxImage.Warning);
-        }
-    }
-
-    private void SetStatus(IssueStatus status)
-    {
-        if (_service is null || _current is null || !SaveCurrent())
-        {
-            return;
-        }
-
-        try
-        {
-            _current = _service.SetStatus(_current.Id.ToString(), status);
-            LoadIssue(_current);
-            RefreshList();
-        }
-        catch (IssueException exception)
-        {
-            MessageBox.Show(this, exception.Message, "Cannot update issue", MessageBoxButton.OK, MessageBoxImage.Warning);
-        }
-    }
-
     private void NewIssue_Click(object sender, RoutedEventArgs e)
     {
         if (_service is null || !ConfirmLeaveCurrent())

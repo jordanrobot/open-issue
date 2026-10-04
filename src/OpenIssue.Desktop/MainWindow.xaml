@@ -50,7 +50,6 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
             <TextBox x:Name="TitleBox" Grid.Row="0" FontSize="20" Padding="6" Margin="0,0,0,8"
                      TextChanged="Editor_Changed" />
@@ -77,13 +76,6 @@
                      VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
                      FontFamily="Consolas" Padding="8" TextChanged="Editor_Changed" />
             <TextBlock x:Name="MessageText" Grid.Row="4" Margin="0,8" TextWrapping="Wrap" />
-            <WrapPanel Grid.Row="5" HorizontalAlignment="Left">
-                <Button Content="Mark ready" Padding="10,5" Margin="0,0,6,0" Click="Ready_Click" />
-                <Button Content="Mark draft" Padding="10,5" Margin="0,0,6,0" Click="Draft_Click" />
-                <Button Content="Close" Padding="10,5" Margin="0,0,6,0" Click="Close_Click" />
-                <Button Content="Decline" Padding="10,5" Margin="0,0,6,0" Click="Decline_Click" />
-                <Button Content="Reopen" Padding="10,5" Click="Reopen_Click" />
-            </WrapPanel>
         </Grid>
     </Grid>
 </Window>
