@@ -558,11 +558,6 @@ public sealed class IssueRepository(string projectRoot)
             throw new IssueException("Issue title must be a single line.");
         }
 
-        if (!issue.Draft && issue.Status != IssueStatus.Open)
-        {
-            throw new IssueException("A ready issue must be open.");
-        }
-
         if (issue.Tags.Any(string.IsNullOrWhiteSpace) || issue.Tags.Distinct(StringComparer.OrdinalIgnoreCase).Count() != issue.Tags.Count)
         {
             throw new IssueException("Tags must be nonempty and unique (ignoring case).");

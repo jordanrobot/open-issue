@@ -134,11 +134,6 @@ public sealed class IssueService(IssueRepository repository)
             current.Draft = draft.Value;
         }
 
-        if (current.Status != IssueStatus.Open)
-        {
-            current.Draft = true;
-        }
-
         current.UpdatedAt = DateTimeOffset.UtcNow;
         return Repository.Update(current, expectedRevision ?? current.Revision);
     }
@@ -147,11 +142,6 @@ public sealed class IssueService(IssueRepository repository)
     {
         var current = Resolve(idOrPrefix);
         current.Status = status;
-        if (status != IssueStatus.Open)
-        {
-            current.Draft = true;
-        }
-
         current.UpdatedAt = DateTimeOffset.UtcNow;
         return Repository.Update(current, current.Revision);
     }

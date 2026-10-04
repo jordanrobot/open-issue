@@ -14,6 +14,7 @@ var tests = new (string Name, Action Run)[]
     ("referenced issues cannot be deleted", ReferencedIssueDeletion),
     ("deleting imported IDs does not reuse them", ImportedIssueIdDeletion),
     ("readiness and deterministic next selection", ReadinessAndNext),
+    ("readiness is independent of issue status", ReadinessIsIndependentOfStatus),
     ("unknown metadata, body, and line-ending preservation", Preservation),
     ("stale revisions do not overwrite edits", RevisionConflict),
     ("service edits reject stale revisions", ServiceRevisionConflict),
@@ -261,9 +262,34 @@ static void ReadinessAndNext()
     True(!ready.Draft, "a ready issue should not require a body or acceptance criteria");
     Equal(bodyless.Id, service.Next()!.Id);
 
-    var closed = service.Create("Closed issue", "");
-    service.SetStatus(closed.Id.ToString(), IssueStatus.Closed);
-    Throws<IssueException>(() => service.SetDraft(closed.Id.ToString(), false));
+}
+
+static void ReadinessIsIndependentOfStatus()
+{
+    using var project = new TemporaryProject();
+    var service = project.Service;
+
+    var readyIssue = service.Create("Ready issue", "");
+    service.SetDraft(readyIssue.Id.ToString(), false);
+    var closedReadyIssue = service.SetStatus(readyIssue.Id.ToString(), IssueStatus.Closed);
+    Equal(IssueStatus.Closed, closedReadyIssue.Status);
+    True(!closedReadyIssue.Draft, "closing a ready issue should preserve readiness");
+
+    var closedDraftIssue = service.Create("Closed draft issue", "");
+    service.SetStatus(closedDraftIssue.Id.ToString(), IssueStatus.Closed);
+    var readyClosedIssue = service.SetDraft(closedDraftIssue.Id.ToString(), false);
+    True(!readyClosedIssue.Draft, "a closed issue should be allowed to become ready");
+
+    var editedIssue = service.Create("Issue edited with closed status", "");
+    var editedClosedReadyIssue = service.Edit(
+        editedIssue.Id.ToString(),
+        status: IssueStatus.Closed,
+        draft: false);
+    Equal(IssueStatus.Closed, editedClosedReadyIssue.Status);
+    True(!editedClosedReadyIssue.Draft, "editing status should not change readiness");
+
+    Equal(0, service.List().Diagnostics.Count);
+    True(service.Next() is null, "closed ready issues should not be selected by next");
 }
 
 static void Preservation()
