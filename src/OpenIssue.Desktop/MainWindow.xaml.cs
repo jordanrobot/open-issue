@@ -530,6 +530,33 @@ public partial class MainWindow : Window
 
     private void Window_Activated(object? sender, EventArgs e) => RefreshList();
 
+    private void DeleteIssue_Click(object sender, RoutedEventArgs e)
+    {
+        if (_service is null || sender is not MenuItem { DataContext: Issue issue })
+        {
+            return;
+        }
+
+        var answer = MessageBox.Show(this,
+            $"Delete issue #{issue.Id}: {issue.Title}? This cannot be undone.",
+            "Delete issue", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (answer != MessageBoxResult.Yes || !ConfirmLeaveCurrent())
+        {
+            return;
+        }
+
+        try
+        {
+            _service.Delete(issue.Id.ToString(CultureInfo.InvariantCulture));
+            _knownRevisions.Remove(issue.Id);
+            RefreshList();
+        }
+        catch (Exception exception) when (exception is IssueException or IOException or UnauthorizedAccessException)
+        {
+            MessageBox.Show(this, exception.Message, "Cannot delete issue", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
         if (!ConfirmLeaveCurrent())

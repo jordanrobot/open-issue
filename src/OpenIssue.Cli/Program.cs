@@ -108,6 +108,19 @@ internal static class Cli
         }, parse.GetValue(showJson)));
         root.Add(show);
 
+        var deleteCommand = new Command("delete", "Delete an issue.");
+        var deleteJson = AddJsonOption(deleteCommand);
+        var deleteId = new Argument<long>("id") { Description = "Positive numeric issue ID." };
+        deleteCommand.Add(deleteId);
+        deleteCommand.SetAction(parse => Run(() =>
+        {
+            var id = parse.GetValue(deleteId);
+            GetService().Delete(id.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            Write(parse.GetValue(deleteJson), new { deleted = true, id }, $"Deleted issue #{id}.");
+            return 0;
+        }, parse.GetValue(deleteJson)));
+        root.Add(deleteCommand);
+
         var edit = new Command("edit", "Update issue fields and relationships.");
         var editJson = AddJsonOption(edit);
         edit.Add(issueId);
@@ -219,6 +232,7 @@ internal static class Cli
                   issue new --title TITLE (--body TEXT | --body-file FILE)
                   issue list [--status VALUE] [--tag TAG] [--priority VALUE] [--ready true|false] [--json]
                   issue show ID [--json]
+                  issue delete ID [--json]
                   issue edit ID [--title TITLE] [--body-file FILE] [--parents ID,...] [--children ID,...]
                   issue close|decline|reopen ID
                   issue ready|unready ID

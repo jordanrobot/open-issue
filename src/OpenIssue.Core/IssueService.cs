@@ -47,6 +47,11 @@ public sealed class IssueService(IssueRepository repository)
 
     public Issue Show(string idOrPrefix) => Resolve(idOrPrefix);
 
+    /// <summary>
+    /// Permanently deletes an issue by its positive numeric ID.
+    /// </summary>
+    public void Delete(string idOrPrefix) => Repository.Delete(Resolve(idOrPrefix).Id);
+
     public Issue Create(string title, string body, IssuePriority priority = IssuePriority.Normal, IEnumerable<string>? tags = null)
     {
         var now = DateTimeOffset.UtcNow;

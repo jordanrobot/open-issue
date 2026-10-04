@@ -166,6 +166,51 @@ public sealed class IssueRepository(string projectRoot)
         return Read(issue.Id);
     }
 
+    /// <summary>
+    /// Permanently deletes an issue that is not referenced by another issue.
+    /// </summary>
+    /// <exception cref="IssueException">The issue is missing, invalid, or referenced by another issue.</exception>
+    public void Delete(long id)
+    {
+        var path = GetIssuePath(id);
+        if (!Directory.Exists(_issuesDirectory))
+        {
+            throw new IssueException($"Issue '{id}' was not found.");
+        }
+
+        ProjectLocator.RejectLink(_issuesDirectory);
+        using (AcquireAllocationLock())
+        using (AcquireLock(id.ToString(CultureInfo.InvariantCulture)))
+        using (AcquireRelationshipLock())
+        {
+            ProjectLocator.RejectLink(path);
+            if (!File.Exists(path))
+            {
+                throw new IssueException($"Issue '{id}' was not found.");
+            }
+
+            var issue = ReadPath(path);
+            if (issue.Id != id)
+            {
+                throw new IssueException($"Issue file '{path}' does not contain the expected ID '{id}'.");
+            }
+
+            var referencingIds = List().Issues
+                .Where(candidate => candidate.Id != id && References(candidate).Contains(id))
+                .Select(candidate => candidate.Id)
+                .Order()
+                .ToArray();
+            if (referencingIds.Length > 0)
+            {
+                throw new IssueException(
+                    $"Issue '{id}' is referenced by issue(s) {string.Join(", ", referencingIds)}. Remove those references before deleting it.");
+            }
+
+            AdvanceIdHighWaterMark(id);
+            File.Delete(path);
+        }
+    }
+
     public string GetIssuePath(long id)
     {
         ValidateId(id);
@@ -196,16 +241,8 @@ public sealed class IssueRepository(string projectRoot)
             throw new IssueException("The numeric issue ID space is exhausted.");
         }
 
-        var counterPath = Path.Combine(ProjectRoot, ProjectLocator.DataDirectoryName, "next-id");
-        ProjectLocator.RejectLink(counterPath);
-        long reservedId = 1;
-        if (File.Exists(counterPath) &&
-            !long.TryParse(File.ReadAllText(counterPath).Trim(), NumberStyles.None,
-                CultureInfo.InvariantCulture, out reservedId))
-        {
-            throw new IssueException($"Invalid numeric ID counter at '{counterPath}'.");
-        }
-
+        var counterPath = GetIdCounterPath();
+        var reservedId = ReadReservedId(counterPath);
         var nextId = Math.Max(reservedId, maxId + 1);
         if (nextId < 1 || nextId == long.MaxValue)
         {
@@ -215,6 +252,34 @@ public sealed class IssueRepository(string projectRoot)
         WriteAtomically(counterPath, (nextId + 1).ToString(CultureInfo.InvariantCulture) + Environment.NewLine,
             overwrite: true);
         return nextId;
+    }
+
+    private void AdvanceIdHighWaterMark(long deletedId)
+    {
+        var nextId = deletedId == long.MaxValue ? long.MaxValue : deletedId + 1;
+        var counterPath = GetIdCounterPath();
+        if (ReadReservedId(counterPath) < nextId)
+        {
+            WriteAtomically(counterPath, nextId.ToString(CultureInfo.InvariantCulture) + Environment.NewLine,
+                overwrite: true);
+        }
+    }
+
+    private string GetIdCounterPath() =>
+        Path.Combine(ProjectRoot, ProjectLocator.DataDirectoryName, "next-id");
+
+    private static long ReadReservedId(string counterPath)
+    {
+        ProjectLocator.RejectLink(counterPath);
+        long reservedId = 1;
+        if (File.Exists(counterPath) &&
+            !long.TryParse(File.ReadAllText(counterPath).Trim(), NumberStyles.None,
+                CultureInfo.InvariantCulture, out reservedId))
+        {
+            throw new IssueException($"Invalid numeric ID counter at '{counterPath}'.");
+        }
+
+        return reservedId;
     }
 
     private void EnsureSafeDirectory()

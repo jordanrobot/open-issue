@@ -9,6 +9,9 @@ var tests = new (string Name, Action Run)[]
     ("new issues are drafts by default", DraftByDefault),
     ("legacy ready values map to draft values", LegacyReadyMetadata),
     ("numeric issue IDs are allocated without collisions", NumericIdAllocation),
+    ("deleting an issue preserves its ID high-water mark", IssueDeletion),
+    ("referenced issues cannot be deleted", ReferencedIssueDeletion),
+    ("deleting imported IDs does not reuse them", ImportedIssueIdDeletion),
     ("readiness and deterministic next selection", ReadinessAndNext),
     ("unknown metadata, body, and line-ending preservation", Preservation),
     ("stale revisions do not overwrite edits", RevisionConflict),
@@ -154,8 +157,53 @@ static void NumericIdAllocation()
     var ids = creates.Select(task => task.Result).Order().ToArray();
     True(ids.SequenceEqual(Enumerable.Range(1, 12).Select(value => (long)value)),
         "concurrent IDs were duplicated or skipped");
-    File.Delete(services[0].Repository.GetIssuePath(ids[^1]));
+    services[0].Delete(ids[^1].ToString(System.Globalization.CultureInfo.InvariantCulture));
     Equal(13L, services[0].Create("After deletion", "Draft").Id);
+}
+
+static void IssueDeletion()
+{
+    using var project = new TemporaryProject();
+    var service = project.Service;
+    var issue = service.Create("Delete me", "No longer needed");
+
+    service.Delete(issue.Id.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+    True(!File.Exists(service.Repository.GetIssuePath(issue.Id)), "deleted issue file still exists");
+    Throws<IssueException>(() => service.Show(issue.Id.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+    Equal(2L, service.Create("After deletion", "Draft").Id);
+}
+
+static void ReferencedIssueDeletion()
+{
+    using var project = new TemporaryProject();
+    var service = project.Service;
+    var source = service.Create("Source", "Draft");
+    var target = service.Create("Target", "Draft");
+    service.Edit(source.Id.ToString(), children: [target.Id]);
+
+    Throws<IssueException>(() => service.Delete(target.Id.ToString()));
+    True(File.Exists(service.Repository.GetIssuePath(target.Id)), "referenced issue was deleted");
+
+    service.Edit(source.Id.ToString(), children: []);
+    service.Delete(target.Id.ToString());
+    Equal(1, service.List().Issues.Count);
+    Equal(0, service.List().Diagnostics.Count);
+}
+
+static void ImportedIssueIdDeletion()
+{
+    using var project = new TemporaryProject();
+    var service = project.Service;
+    var original = service.Create("Original", "Draft");
+    const long importedId = 100;
+    var importedContent = File.ReadAllText(service.Repository.GetIssuePath(original.Id))
+        .Replace($"id: {original.Id}", $"id: {importedId}", StringComparison.Ordinal);
+    File.WriteAllText(service.Repository.GetIssuePath(importedId), importedContent);
+
+    service.Delete(importedId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+    Equal(importedId + 1, service.Create("After imported deletion", "Draft").Id);
 }
 
 static void ReadinessAndNext()

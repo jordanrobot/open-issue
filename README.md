@@ -37,6 +37,7 @@ issue init
 issue new --title "Document the API" --body-file issue.md
 issue list
 issue show 1 --json
+issue delete 12
 issue next --json
 ```
 

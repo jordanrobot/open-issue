@@ -3,6 +3,12 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Open Issue" Height="760" Width="1120" MinHeight="540" MinWidth="820"
         Activated="Window_Activated">
+    <Window.Resources>
+        <ContextMenu x:Key="IssueContextMenu"
+                     DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+            <MenuItem Header="Delete issue" Click="DeleteIssue_Click" />
+        </ContextMenu>
+    </Window.Resources>
     <Grid Margin="12">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="360" />
@@ -36,7 +42,13 @@
                           Unchecked="Filter_Changed" />
             </StackPanel>
             <ListBox x:Name="IssueList" Grid.Row="2" SelectionChanged="IssueList_SelectionChanged"
-                     DisplayMemberPath="Title" />
+                     DisplayMemberPath="Title">
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="ContextMenu" Value="{StaticResource IssueContextMenu}" />
+                    </Style>
+                </ListBox.ItemContainerStyle>
+            </ListBox>
             <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,8,0,0">
                 <Button Content="New issue" Padding="10,5" Click="NewIssue_Click" />
                 <Button Content="Refresh" Padding="10,5" Margin="8,0,0,0" Click="Refresh_Click" />

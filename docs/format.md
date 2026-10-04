@@ -67,6 +67,8 @@ Files are never rewritten on read. Malformed issue files are reported individual
 
 Writes use a temporary file in the issue directory, flush it, and move it into place. Per-issue exclusive locks coordinate writers; issue creation also takes a project-wide allocation lock. An update checks the caller’s SHA-256 revision before preparing and immediately before replacing the file, reporting conflicts instead of overwriting manual/concurrent edits. Manual edits should preserve YAML validity, the filename/ID match, allowed values, and numeric references.
 
+Deleting an issue is permanent and is rejected while another issue references its ID; remove those links first. Before removing the file, deletion advances the `next-id` high-water mark past the deleted numeric ID, including IDs from imported issue files, so that ID is never allocated again. This format uses numeric issue IDs only; it does not define GUID issue IDs.
+
 ## Ordering and selection
 
 Lists are ordered by status (`open`, `closed`, `declined`), priority descending (`urgent`, `high`, `normal`, `low`), creation time ascending, then numeric ID ascending. `next` considers open, non-draft, unblocked issues and uses priority descending, creation time ascending, then numeric ID ascending. It reports an issue; it does not start work.
