@@ -110,7 +110,7 @@ public partial class MainWindow : Window
             var filter = new IssueFilter(
                 status == "all status" ? null : ParseStatus(status),
                 Priority: priority == "all priority" ? null : ParsePriority(priority),
-                Ready: ReadyFilter.IsChecked == true ? true : null);
+                Draft: ReadyFilter.IsChecked == true ? false : null);
             var listed = _service.List(filter);
             var result = string.IsNullOrEmpty(query)
                 ? listed
@@ -163,7 +163,7 @@ public partial class MainWindow : Window
          TagsBox.Text != string.Join(", ", _current.Tags) ||
          Selected(StatusBox) != _current.Status.ToString().ToLowerInvariant() ||
          Selected(PriorityBox) != _current.Priority.ToString().ToLowerInvariant() ||
-         DraftBox.IsChecked != !_current.Ready);
+         DraftBox.IsChecked != _current.Draft);
 
     private bool SaveCurrent()
     {
@@ -178,7 +178,7 @@ public partial class MainWindow : Window
                 ParsePriority(Selected(PriorityBox)),
                 TagsBox.Text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
                 status: ParseStatus(Selected(StatusBox)),
-                ready: DraftBox.IsChecked == false);
+                draft: DraftBox.IsChecked != false);
             LoadIssue(_current);
             MessageText.Text = "Issue saved.";
             return true;
@@ -202,7 +202,7 @@ public partial class MainWindow : Window
             TagsBox.Text = issue is null ? "" : string.Join(", ", issue.Tags);
             SetSelected(StatusBox, issue?.Status.ToString().ToLowerInvariant());
             SetSelected(PriorityBox, issue?.Priority.ToString().ToLowerInvariant());
-            DraftBox.IsChecked = issue is null || !issue.Ready;
+            DraftBox.IsChecked = issue?.Draft ?? true;
             SetEditorEnabled(issue is not null);
         }
         finally
@@ -271,7 +271,7 @@ public partial class MainWindow : Window
 
         try
         {
-            _current = _service.SetReady(_current.Id.ToString(), true);
+            _current = _service.SetDraft(_current.Id.ToString(), draft: false);
             LoadIssue(_current);
             RefreshList();
         }
@@ -281,12 +281,12 @@ public partial class MainWindow : Window
         }
     }
 
-    private void Draft_Click(object sender, RoutedEventArgs e) => SetStatusOrReady(ready: false);
+    private void Draft_Click(object sender, RoutedEventArgs e) => SetDraft(draft: true);
     private void Close_Click(object sender, RoutedEventArgs e) => SetStatus(IssueStatus.Closed);
     private void Decline_Click(object sender, RoutedEventArgs e) => SetStatus(IssueStatus.Declined);
     private void Reopen_Click(object sender, RoutedEventArgs e) => SetStatus(IssueStatus.Open);
 
-    private void SetStatusOrReady(bool ready)
+    private void SetDraft(bool draft)
     {
         if (_service is null || _current is null || !SaveCurrent())
         {
@@ -295,7 +295,7 @@ public partial class MainWindow : Window
 
         try
         {
-            _current = _service.SetReady(_current.Id.ToString(), ready);
+            _current = _service.SetDraft(_current.Id.ToString(), draft);
             LoadIssue(_current);
             RefreshList();
         }

@@ -85,7 +85,7 @@ internal static class Cli
             {
                 foreach (var issue in result.Issues)
                 {
-                    Console.WriteLine($"#{issue.Id,-5} {issue.Status.ToString().ToLowerInvariant(),-8} {issue.Priority.ToString().ToLowerInvariant(),-7} {(issue.Ready ? "ready" : "draft"),-5}  {issue.Title}");
+                    Console.WriteLine($"#{issue.Id,-5} {issue.Status.ToString().ToLowerInvariant(),-8} {issue.Priority.ToString().ToLowerInvariant(),-7} {(issue.Draft ? "draft" : "ready"),-5}  {issue.Title}");
                 }
 
                 PrintDiagnostics(result.Diagnostics);
@@ -144,7 +144,7 @@ internal static class Cli
                 related: parse.GetValue(related) is { } relatedValue ? ParseIds(relatedValue) : null,
                 blocks: parse.GetValue(blocks) is { } blocksValue ? ParseIds(blocksValue) : null,
                 status: ParseStatus(parse.GetValue(editStatus)),
-                ready: ParseBoolean(parse.GetValue(editReady)));
+                draft: ParseDraftFromReady(parse.GetValue(editReady)));
             Write(parse.GetValue(editJson), issue, FormatIssue(issue));
             return 0;
         }, parse.GetValue(editJson)));
@@ -304,7 +304,8 @@ internal static class Cli
         command.Add(id);
         command.SetAction(parse => Run(() =>
         {
-            var issue = GetService().SetReady(parse.GetValue(id).ToString(System.Globalization.CultureInfo.InvariantCulture), ready);
+            var issue = GetService().SetDraft(parse.GetValue(id).ToString(System.Globalization.CultureInfo.InvariantCulture),
+                draft: !ready);
             Write(parse.GetValue(json), issue, FormatIssue(issue));
             return 0;
         }, parse.GetValue(json)));
@@ -409,7 +410,10 @@ internal static class Cli
     }
 
     private static IssueFilter ParseFilter(string? status, string? tag, string? priority, string? ready) =>
-        new(ParseStatus(status), tag, ParsePriority(priority), ParseBoolean(ready));
+        new(ParseStatus(status), tag, ParsePriority(priority), ParseDraftFromReady(ready));
+
+    private static bool? ParseDraftFromReady(string? ready) =>
+        ParseBoolean(ready) is { } isReady ? !isReady : null;
 
     private static IssueStatus? ParseStatus(string? value) => ParseEnum<IssueStatus>(value, "status");
     private static IssuePriority? ParsePriority(string? value) => ParseEnum<IssuePriority>(value, "priority");
@@ -442,7 +446,7 @@ internal static class Cli
     }
 
     private static string FormatIssue(Issue issue) =>
-        $"{issue.Title}\nID: {issue.Id}\nStatus: {issue.Status.ToString().ToLowerInvariant()}\nDraft: {!issue.Ready}\nPriority: {issue.Priority.ToString().ToLowerInvariant()}\nParents: {string.Join(", ", issue.Parents)}\nChildren: {string.Join(", ", issue.Children)}\nTags: {string.Join(", ", issue.Tags)}\n\n{issue.Body}";
+        $"{issue.Title}\nID: {issue.Id}\nStatus: {issue.Status.ToString().ToLowerInvariant()}\nDraft: {issue.Draft}\nPriority: {issue.Priority.ToString().ToLowerInvariant()}\nParents: {string.Join(", ", issue.Parents)}\nChildren: {string.Join(", ", issue.Children)}\nTags: {string.Join(", ", issue.Tags)}\n\n{issue.Body}";
 
     private static void PrintDiagnostics(IEnumerable<IssueDiagnostic> diagnostics)
     {

@@ -20,7 +20,7 @@ public sealed class Issue
     public required long Id { get; set; }
     public required string Title { get; set; }
     public IssueStatus Status { get; set; } = IssueStatus.Open;
-    public bool Ready { get; set; }
+    public bool Draft { get; set; } = true;
     public IssuePriority Priority { get; set; } = IssuePriority.Normal;
     public List<string> Tags { get; set; } = [];
     public required DateTimeOffset CreatedAt { get; set; }
@@ -45,4 +45,4 @@ public sealed record IssueFilter(
     IssueStatus? Status = null,
     string? Tag = null,
     IssuePriority? Priority = null,
-    bool? Ready = null);
+    bool? Draft = null);

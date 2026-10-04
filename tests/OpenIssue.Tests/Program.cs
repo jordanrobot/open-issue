@@ -7,6 +7,7 @@ var tests = new (string Name, Action Run)[]
     ("dangling project symlinks cannot fall through to a parent project", DanglingProjectLink),
     ("issue creation, listing, search, and Unicode", IssueOperations),
     ("new issues are drafts by default", DraftByDefault),
+    ("legacy ready values map to draft values", LegacyReadyMetadata),
     ("numeric issue IDs are allocated without collisions", NumericIdAllocation),
     ("readiness and deterministic next selection", ReadinessAndNext),
     ("unknown metadata, body, and line-ending preservation", Preservation),
@@ -104,9 +105,40 @@ static void DraftByDefault()
     using var project = new TemporaryProject();
     var service = project.Service;
     var issue = service.Create("Draft issue", "# Acceptance criteria\n\nComplete review\n");
-    True(!issue.Ready, "new issues should be drafts until explicitly marked ready");
+    True(issue.Draft, "new issues should be drafts until explicitly marked ready");
     var issueFile = File.ReadAllText(service.Repository.GetIssuePath(issue.Id));
-    True(issueFile.Contains("ready: false", StringComparison.Ordinal), "new issue was not persisted as a draft");
+    True(issueFile.Contains("schema: 3", StringComparison.Ordinal), "new issue did not use the current schema");
+    True(issueFile.Contains("draft: true", StringComparison.Ordinal), "new issue was not persisted as a draft");
+    True(!issueFile.Contains("ready:", StringComparison.Ordinal), "new issue still uses the legacy ready field");
+}
+
+static void LegacyReadyMetadata()
+{
+    using var project = new TemporaryProject();
+    var repository = project.Service.Repository;
+    const long id = 112;
+    var content = string.Join("\n",
+        "---",
+        "schema: 2",
+        $"id: {id}",
+        "title: Legacy ready issue",
+        "status: open",
+        "ready: true",
+        "priority: normal",
+        "tags: []",
+        "created_at: \"2026-01-01T00:00:00.0000000+00:00\"",
+        "updated_at: \"2026-01-01T00:00:00.0000000+00:00\"",
+        "parents: []",
+        "children: []",
+        "related: []",
+        "blocks: []",
+        "---",
+        "# Acceptance criteria",
+        "",
+        "Complete review",
+        "");
+    File.WriteAllText(repository.GetIssuePath(id), content);
+    True(!repository.Read(id).Draft, "legacy ready: true should map to draft: false");
 }
 
 static void NumericIdAllocation()
@@ -131,14 +163,16 @@ static void ReadinessAndNext()
     var service = project.Service;
     var blocked = service.Create("Blocked task", "# Acceptance criteria\n\nMust ship\n", IssuePriority.Low);
     var blocker = service.Create("Urgent blocker", "# Acceptance criteria\n\nMust unblock\n", IssuePriority.Urgent);
-    service.SetReady(blocked.Id.ToString(), true);
-    service.SetReady(blocker.Id.ToString(), true);
+    service.SetDraft(blocked.Id.ToString(), false);
+    service.SetDraft(blocker.Id.ToString(), false);
+    Equal(0, service.List(new IssueFilter(Draft: true)).Issues.Count);
+    Equal(2, service.List(new IssueFilter(Draft: false)).Issues.Count);
     service.Edit(blocker.Id.ToString(), blocks: [blocked.Id]);
     Equal(blocker.Id, service.Next()!.Id);
     service.SetStatus(blocker.Id.ToString(), IssueStatus.Closed);
     True(service.Next() is null, "blocked issue was selected");
     var draft = service.Create("Draft", "Context only");
-    Throws<IssueException>(() => service.SetReady(draft.Id.ToString(), true));
+    Throws<IssueException>(() => service.SetDraft(draft.Id.ToString(), false));
 }
 
 static void Preservation()
@@ -170,12 +204,16 @@ static void Preservation()
         "");
     File.WriteAllText(repository.GetIssuePath(id), content);
     var issue = repository.Read(id);
+    True(issue.Draft, "legacy ready: false should map to draft: true");
     issue.Title = "Updated";
     issue.UpdatedAt = DateTimeOffset.UtcNow;
     var updated = repository.Update(issue, issue.Revision);
     var result = File.ReadAllText(repository.GetIssuePath(id));
     True(result.Contains("nested: retained", StringComparison.Ordinal), "unknown frontmatter was lost");
     True(result.Contains("# Body\r\n\r\ncafé\r\n", StringComparison.Ordinal), "body or CRLF line endings changed");
+    True(result.Contains("schema: 3", StringComparison.Ordinal), "legacy issue was not upgraded to schema 3");
+    True(result.Contains("draft: true", StringComparison.Ordinal), "legacy readiness was not inverted on write");
+    True(!result.Contains("ready:", StringComparison.Ordinal), "legacy ready field was not removed on write");
     Equal("Updated", updated.Title);
 }
 

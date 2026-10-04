@@ -302,9 +302,9 @@ public sealed class IssueRepository(string projectRoot)
             }
 
             var schema = ReadInt(values, "schema");
-            if (schema != 2)
+            if (schema is not (2 or 3))
             {
-                throw new IssueException($"Unsupported issue schema version {schema}; this program supports version 2.");
+                throw new IssueException($"Unsupported issue schema version {schema}; this program supports versions 2 and 3.");
             }
 
             var id = ReadLong(values, "id");
@@ -312,7 +312,7 @@ public sealed class IssueRepository(string projectRoot)
             var title = ReadString(values, "title");
             var status = ParseEnum<IssueStatus>(ReadString(values, "status"), "status");
             var priority = ParseEnum<IssuePriority>(ReadString(values, "priority"), "priority");
-            var ready = ReadBool(values, "ready");
+            var draft = schema == 2 ? !ReadBool(values, "ready") : ReadBool(values, "draft");
             var created = ReadDate(values, "created_at");
             var updated = ReadDate(values, "updated_at");
             var tags = ReadStringList(values, "tags");
@@ -331,7 +331,7 @@ public sealed class IssueRepository(string projectRoot)
                 Title = title,
                 Status = status,
                 Priority = priority,
-                Ready = ready,
+                Draft = draft,
                 CreatedAt = created,
                 UpdatedAt = updated,
                 Tags = tags,
@@ -360,11 +360,12 @@ public sealed class IssueRepository(string projectRoot)
     private static string Serialize(Issue issue)
     {
         var map = issue.Frontmatter ?? new YamlMappingNode();
-        Put(map, "schema", new YamlScalarNode("2"));
+        Put(map, "schema", new YamlScalarNode("3"));
         Put(map, "id", new YamlScalarNode(issue.Id.ToString(CultureInfo.InvariantCulture)));
         Put(map, "title", new YamlScalarNode(issue.Title));
         Put(map, "status", new YamlScalarNode(issue.Status.ToString().ToLowerInvariant()));
-        Put(map, "ready", new YamlScalarNode(issue.Ready ? "true" : "false"));
+        map.Children.Remove(new YamlScalarNode("ready"));
+        Put(map, "draft", new YamlScalarNode(issue.Draft ? "true" : "false"));
         Put(map, "priority", new YamlScalarNode(issue.Priority.ToString().ToLowerInvariant()));
         Put(map, "tags", new YamlSequenceNode(issue.Tags.Select(tag => new YamlScalarNode(tag))));
         Put(map, "created_at", new YamlScalarNode(issue.CreatedAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)));
@@ -488,7 +489,7 @@ public sealed class IssueRepository(string projectRoot)
             throw new IssueException("Issue title must be a single line.");
         }
 
-        if (issue.Ready && (issue.Status != IssueStatus.Open || !HasAcceptanceCriteria(issue.Body)))
+        if (!issue.Draft && (issue.Status != IssueStatus.Open || !HasAcceptanceCriteria(issue.Body)))
         {
             throw new IssueException("A ready issue must be open and have nonempty Acceptance criteria.");
         }

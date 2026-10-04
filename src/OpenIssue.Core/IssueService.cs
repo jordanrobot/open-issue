@@ -23,9 +23,9 @@ public sealed class IssueService(IssueRepository repository)
             issues = issues.Where(issue => issue.Priority == priority);
         }
 
-        if (filter?.Ready is { } ready)
+        if (filter?.Draft is { } draft)
         {
-            issues = issues.Where(issue => issue.Ready == ready);
+            issues = issues.Where(issue => issue.Draft == draft);
         }
 
         return new IssueListResult(issues.OrderBy(issue => issue.Status)
@@ -55,6 +55,7 @@ public sealed class IssueService(IssueRepository repository)
             Id = 0,
             Title = title,
             Body = body,
+            Draft = true,
             Priority = priority,
             Tags = tags?.ToList() ?? [],
             CreatedAt = now,
@@ -73,7 +74,7 @@ public sealed class IssueService(IssueRepository repository)
         IEnumerable<long>? related = null,
         IEnumerable<long>? blocks = null,
         IssueStatus? status = null,
-        bool? ready = null)
+        bool? draft = null)
     {
         var current = Resolve(idOrPrefix);
         if (title is not null)
@@ -121,14 +122,14 @@ public sealed class IssueService(IssueRepository repository)
             current.Status = status.Value;
         }
 
-        if (ready is not null)
+        if (draft is not null)
         {
-            current.Ready = ready.Value;
+            current.Draft = draft.Value;
         }
 
         if (current.Status != IssueStatus.Open)
         {
-            current.Ready = false;
+            current.Draft = true;
         }
 
         current.UpdatedAt = DateTimeOffset.UtcNow;
@@ -141,17 +142,17 @@ public sealed class IssueService(IssueRepository repository)
         current.Status = status;
         if (status != IssueStatus.Open)
         {
-            current.Ready = false;
+            current.Draft = true;
         }
 
         current.UpdatedAt = DateTimeOffset.UtcNow;
         return Repository.Update(current, current.Revision);
     }
 
-    public Issue SetReady(string idOrPrefix, bool ready)
+    public Issue SetDraft(string idOrPrefix, bool draft)
     {
         var current = Resolve(idOrPrefix);
-        current.Ready = ready;
+        current.Draft = draft;
         current.UpdatedAt = DateTimeOffset.UtcNow;
         return Repository.Update(current, current.Revision);
     }
@@ -170,7 +171,7 @@ public sealed class IssueService(IssueRepository repository)
     {
         var issues = Repository.List().Issues;
         var blocked = issues.SelectMany(issue => issue.Blocks).ToHashSet();
-        return issues.Where(issue => issue.Status == IssueStatus.Open && issue.Ready && !blocked.Contains(issue.Id))
+        return issues.Where(issue => issue.Status == IssueStatus.Open && !issue.Draft && !blocked.Contains(issue.Id))
             .OrderByDescending(issue => issue.Priority)
             .ThenBy(issue => issue.CreatedAt)
             .ThenBy(issue => issue.Id)
