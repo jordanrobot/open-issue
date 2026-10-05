@@ -89,7 +89,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         : Format("WindowTitleFormat", ProjectRoot);
 
     public string MetadataText => SelectedIssue is null
-        ? string.Empty
+        ? GetString("SelectIssuePrompt")
         : Format(
             "IssueMetadataFormat",
             string.IsNullOrWhiteSpace(SelectedIssue.CreatedBy)

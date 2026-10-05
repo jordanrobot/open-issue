@@ -15,6 +15,18 @@
   <data name="AppTitle" xml:space="preserve">
     <value>Open Issue</value>
   </data>
+  <data name="IssueDetailsHeading.Text" xml:space="preserve">
+    <value>Issue details</value>
+  </data>
+  <data name="IssueListHeading.Text" xml:space="preserve">
+    <value>Issues</value>
+  </data>
+  <data name="IssueListEmptyTitle.Text" xml:space="preserve">
+    <value>No issues to show</value>
+  </data>
+  <data name="IssueListEmptyDescription.Text" xml:space="preserve">
+    <value>Try a different search or filter, or choose New issue to create one.</value>
+  </data>
   <data name="WindowTitleFormat" xml:space="preserve">
     <value>Open Issue - {0}</value>
   </data>
@@ -107,6 +119,12 @@
   </data>
   <data name="BodyBox.Header" xml:space="preserve">
     <value>Issue body</value>
+  </data>
+  <data name="BodyBox.PlaceholderText" xml:space="preserve">
+    <value>Describe the issue here.</value>
+  </data>
+  <data name="SelectIssuePrompt" xml:space="preserve">
+    <value>Select an issue or create one to begin editing.</value>
   </data>
   <data name="UnknownCreator" xml:space="preserve">
     <value>Unknown</value>

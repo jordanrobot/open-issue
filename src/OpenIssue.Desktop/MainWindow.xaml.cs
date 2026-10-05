@@ -9,6 +9,7 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.Windows.ApplicationModel.Resources;
 using OpenIssue.Core;
 using Windows.Graphics;
@@ -33,6 +34,13 @@ public sealed partial class MainWindow : Window
 
     public MainWindowViewModel ViewModel { get; }
 
+    /// <summary>Determines whether the issue list's empty-state guidance should be visible.</summary>
+    /// <param name="issueCount">The number of issues currently shown.</param>
+    /// <param name="isRefreshing">Whether the issue list is refreshing.</param>
+    /// <returns>Visible when no issues are shown and a refresh is not in progress.</returns>
+    public static Visibility EmptyStateVisibility(int issueCount, bool isRefreshing) =>
+        issueCount == 0 && !isRefreshing ? Visibility.Visible : Visibility.Collapsed;
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint GetDpiForWindow(nint hwnd);
 
@@ -41,6 +49,7 @@ public sealed partial class MainWindow : Window
         _launchArguments = launchArguments;
         ViewModel = new MainWindowViewModel();
         InitializeComponent();
+        SystemBackdrop = new MicaBackdrop();
         SetInitialWindowSize();
         AppWindow.SetIcon("Assets/AppIcon.ico");
 
@@ -331,7 +340,18 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void Filter_Changed(object sender, RoutedEventArgs e)
+    private void SearchBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs e)
+    {
+        if (e.Reason is AutoSuggestionBoxTextChangeReason.UserInput)
+        {
+            ScheduleFilterRefresh();
+        }
+    }
+
+    private void Filter_Changed(object sender, RoutedEventArgs e) =>
+        ScheduleFilterRefresh();
+
+    private void ScheduleFilterRefresh()
     {
         if (ViewModel.IsLoadingIssue)
         {
