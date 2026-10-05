@@ -354,6 +354,19 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        await DeleteIssueAsync(issue);
+    }
+
+    private async void DeleteIssueContextMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: Issue issue })
+        {
+            await DeleteIssueAsync(issue);
+        }
+    }
+
+    private async Task DeleteIssueAsync(Issue issue)
+    {
         var answer = await ShowConfirmationAsync(
             GetString("DialogDeleteIssueTitle"),
             Format("DialogDeleteIssueFormat", issue.Id, issue.Title),

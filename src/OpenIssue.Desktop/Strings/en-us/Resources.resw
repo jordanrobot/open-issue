@@ -210,6 +210,9 @@
   <data name="ButtonDelete" xml:space="preserve">
     <value>Delete</value>
   </data>
+  <data name="IssueListDeleteContextMenuItem.Text" xml:space="preserve">
+    <value>Delete Issue</value>
+  </data>
   <data name="ButtonOk" xml:space="preserve">
     <value>OK</value>
   </data>

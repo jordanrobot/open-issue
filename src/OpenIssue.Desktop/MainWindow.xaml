@@ -76,10 +76,20 @@
                 AutomationProperties.Name="{x:Bind ViewModel.IssueListAutomationName, Mode=OneTime}">
                 <ListView.ItemTemplate>
                     <DataTemplate x:DataType="core:Issue">
-                        <TextBlock
-                            Padding="8,4"
-                            Text="{x:Bind local:MainWindowViewModel.FormatIssueLabel(Id, Title), Mode=OneTime}"
-                            TextTrimming="CharacterEllipsis" />
+                        <Grid Background="Transparent">
+                            <Grid.ContextFlyout>
+                                <MenuFlyout>
+                                    <MenuFlyoutItem
+                                        x:Uid="IssueListDeleteContextMenuItem"
+                                        Click="DeleteIssueContextMenuItem_Click"
+                                        AutomationProperties.AutomationId="IssueListDeleteContextMenuItem" />
+                                </MenuFlyout>
+                            </Grid.ContextFlyout>
+                            <TextBlock
+                                Padding="8,4"
+                                Text="{x:Bind local:MainWindowViewModel.FormatIssueLabel(Id, Title), Mode=OneTime}"
+                                TextTrimming="CharacterEllipsis" />
+                        </Grid>
                     </DataTemplate>
                 </ListView.ItemTemplate>
             </ListView>
