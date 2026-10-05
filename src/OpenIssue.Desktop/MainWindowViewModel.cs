@@ -123,7 +123,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
          SelectedIssuePriority?.Value != SelectedIssue.Priority.ToString().ToLowerInvariant() ||
          IsDraft != SelectedIssue.Draft);
 
-    public bool IsEditorEnabled => SelectedIssue is not null && !IsSaving;
+    public bool IsEditorEnabled => SelectedIssue is not null;
+
+    /// <summary>Gets whether the selected issue can be deleted without interrupting a save.</summary>
+    public bool IsDeleteEnabled => IsEditorEnabled && !IsSaving;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(WindowTitle))]
@@ -144,6 +147,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsDirty))]
     [NotifyPropertyChangedFor(nameof(IsEditorEnabled))]
+    [NotifyPropertyChangedFor(nameof(IsDeleteEnabled))]
     [NotifyPropertyChangedFor(nameof(MetadataText))]
     public partial Issue? SelectedIssue { get; set; }
 
@@ -175,7 +179,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public partial bool IsLoadingIssue { get; set; }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsEditorEnabled))]
+    [NotifyPropertyChangedFor(nameof(IsDeleteEnabled))]
     public partial bool IsSaving { get; set; }
 
     [ObservableProperty]
@@ -201,13 +205,14 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [RelayCommand(AllowConcurrentExecutions = true)]
     private async Task RefreshAsync()
     {
-        await RefreshIssuesAsync();
+        await RefreshIssuesAsync(preserveCurrentEditor: true);
     }
 
     [RelayCommand]
     private async Task SaveAsync()
     {
-        await SaveCurrentAsync();
+        // Autosave must not rebuild the list or reload editor values while the user is typing.
+        await SaveCurrentAsync(refreshIssueList: false);
     }
 
     public async Task<bool> RefreshIssuesAsync(bool preserveCurrentEditor = false)

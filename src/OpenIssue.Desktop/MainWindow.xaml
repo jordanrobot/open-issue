@@ -108,7 +108,7 @@
                     x:Name="DeleteIssueButton"
                     x:Uid="DeleteIssueButton"
                     Click="DeleteIssue_Click"
-                    IsEnabled="{x:Bind ViewModel.IsEditorEnabled, Mode=OneWay}"
+                    IsEnabled="{x:Bind ViewModel.IsDeleteEnabled, Mode=OneWay}"
                     AutomationProperties.AutomationId="DeleteIssueButton" />
             </StackPanel>
         </Grid>

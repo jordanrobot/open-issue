@@ -71,6 +71,10 @@ PowerShell helpers are also available from the repository root:
 
 The CLI and core target portable .NET 10. The Windows desktop app uses WinUI 3 and the Windows App SDK. Build or package it with `src/OpenIssue.Desktop/OpenIssue.Desktop.csproj`; the desktop UI shares the core and storage contract with the CLI.
 
+The desktop editor autosaves without disabling entry fields or moving keyboard focus. Autosave updates the issue's list row in place; search and status/priority filters are reapplied when you change a filter or refresh the list, not after each keystroke. Creating an issue also leaves focus on the control you used.
+
+For the native focus regression checks, launch the built desktop app on a disposable initialized project, then run `.\scripts\test-desktop-focus.ps1 -AppPid <desktop-process-id> -TestProjectRoot <disposable-project-path>`. This requires `winapp ui` and an unlocked interactive desktop. The script creates and edits a test issue; do not point it at your working issue store.
+
 ## Format and agent use
 
 See [the file format and storage contract](docs/format.md), [safe CLI/agent workflows](docs/agent-usage.md), [Windows release instructions](docs/release.md), and [issue body guidance](docs/starter-issue.md).

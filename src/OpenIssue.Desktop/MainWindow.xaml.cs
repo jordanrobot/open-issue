@@ -310,6 +310,11 @@ public sealed partial class MainWindow : Window
         }
 
         var previous = ViewModel.SelectedIssue;
+        if (previous?.Id == issue.Id)
+        {
+            return;
+        }
+
         if (previous is not null &&
             previous.Id != issue.Id &&
             !await ConfirmLeaveCurrentAsync())
@@ -450,7 +455,6 @@ public sealed partial class MainWindow : Window
         try
         {
             await ViewModel.CreateIssueCommand.ExecuteAsync(null);
-            TitleBox.Focus(FocusState.Programmatic);
         }
         catch (Exception exception) when (exception is IssueException or IOException or UnauthorizedAccessException)
         {
