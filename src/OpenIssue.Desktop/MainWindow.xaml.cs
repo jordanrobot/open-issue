@@ -304,12 +304,14 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel.IsLoadingIssue ||
             ViewModel.IsRefreshing ||
-            IssueList.SelectedItem is not Issue issue)
+            IssueList.SelectedItem is not IssueListItem row)
         {
             return;
         }
 
+        var issue = row.Issue;
         var previous = ViewModel.SelectedIssue;
+        var previousRow = ViewModel.SelectedIssueListItem;
         if (previous?.Id == issue.Id)
         {
             return;
@@ -319,13 +321,13 @@ public sealed partial class MainWindow : Window
             previous.Id != issue.Id &&
             !await ConfirmLeaveCurrentAsync())
         {
-            IssueList.SelectedItem = previous;
+            IssueList.SelectedItem = previousRow;
             return;
         }
 
         if (!await ViewModel.SelectIssueAsync(issue))
         {
-            IssueList.SelectedItem = previous;
+            IssueList.SelectedItem = previousRow;
         }
     }
 
@@ -364,9 +366,9 @@ public sealed partial class MainWindow : Window
 
     private async void DeleteIssueContextMenuItem_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: Issue issue })
+        if (sender is FrameworkElement { DataContext: IssueListItem row })
         {
-            await DeleteIssueAsync(issue);
+            await DeleteIssueAsync(row.Issue);
         }
     }
 

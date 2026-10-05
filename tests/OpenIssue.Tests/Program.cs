@@ -1,4 +1,6 @@
 using OpenIssue.Core;
+using OpenIssue.Desktop;
+using System.Collections.Specialized;
 
 var tests = new (string Name, Action Run)[]
 {
@@ -25,7 +27,14 @@ var tests = new (string Name, Action Run)[]
     ("references are checked", References),
     ("broken references are reported", BrokenReferences),
     ("issue symlinks are rejected", SymlinkIssues),
-    ("unsafe IDs are rejected", UnsafeIds)
+    ("unsafe IDs are rejected", UnsafeIds),
+    ("list refresh retains rows without collection notifications", ListRefreshRetainsRows),
+    ("title edits update the existing row without replacement", ListTitleUpdatesInPlace),
+    ("body edits do not notify the displayed row", ListBodyUpdatesWithoutRedraw),
+    ("filter changes remove only excluded rows", ListFilterRemovesOnlyExcludedRows),
+    ("list additions and reordering preserve surviving rows", ListReorderingPreservesRows),
+    ("empty list results remove rows without a reset", ListEmptyResultsWithoutReset),
+    ("list row identity cannot be changed", ListRowIdentity)
 };
 
 var failed = 0;
@@ -525,6 +534,112 @@ static void UnsafeIds()
 {
     using var project = new TemporaryProject();
     Throws<IssueException>(() => project.Service.Repository.Read(0));
+}
+
+static Issue ListIssue(long id, string title, string body = "") => new()
+{
+    Id = id,
+    Title = title,
+    Body = body,
+    CreatedAt = DateTimeOffset.UnixEpoch,
+    UpdatedAt = DateTimeOffset.UnixEpoch
+};
+
+static void ListRefreshRetainsRows()
+{
+    var rows = new IssueListCollection();
+    rows.Synchronize([ListIssue(1, "First"), ListIssue(2, "Second")]);
+    var first = rows[0];
+    var second = rows[1];
+    var actions = new List<NotifyCollectionChangedAction>();
+    rows.CollectionChanged += (_, args) => actions.Add(args.Action);
+    rows.Synchronize([ListIssue(1, "First"), ListIssue(2, "Second")]);
+    Equal(0, actions.Count);
+    True(ReferenceEquals(first, rows[0]) && ReferenceEquals(second, rows[1]),
+        "unchanged refresh recreated list rows");
+}
+
+static void ListTitleUpdatesInPlace()
+{
+    var rows = new IssueListCollection();
+    rows.Synchronize([ListIssue(1, "Old title")]);
+    var row = rows[0];
+    var actions = new List<NotifyCollectionChangedAction>();
+    var properties = new List<string?>();
+    rows.CollectionChanged += (_, args) => actions.Add(args.Action);
+    row.PropertyChanged += (_, args) => properties.Add(args.PropertyName);
+    var latest = ListIssue(1, "New title");
+    row.Update(latest);
+    Equal(0, actions.Count);
+    Equal(nameof(IssueListItem.Title), properties.Single());
+    Equal("New title", row.Title);
+    True(ReferenceEquals(row, rows[0]) && ReferenceEquals(latest, row.Issue),
+        "title update did not preserve the row and latest snapshot");
+}
+
+static void ListBodyUpdatesWithoutRedraw()
+{
+    var rows = new IssueListCollection();
+    rows.Synchronize([ListIssue(1, "Title", "Old body")]);
+    var properties = new List<string?>();
+    var actions = new List<NotifyCollectionChangedAction>();
+    rows[0].PropertyChanged += (_, args) => properties.Add(args.PropertyName);
+    rows.CollectionChanged += (_, args) => actions.Add(args.Action);
+    rows.Synchronize([ListIssue(1, "Title", "New body")]);
+    Equal(0, properties.Count);
+    Equal(0, actions.Count);
+    Equal("New body", rows[0].Issue.Body);
+}
+
+static void ListFilterRemovesOnlyExcludedRows()
+{
+    var rows = new IssueListCollection();
+    rows.Synchronize([ListIssue(1, "First"), ListIssue(2, "Second"), ListIssue(3, "Third")]);
+    var retained = rows[1];
+    var actions = new List<NotifyCollectionChangedAction>();
+    rows.CollectionChanged += (_, args) => actions.Add(args.Action);
+    rows.Synchronize([ListIssue(2, "Second")]);
+    Equal(1, rows.Count);
+    True(ReferenceEquals(retained, rows[0]), "filtering recreated the surviving row");
+    True(actions.SequenceEqual([NotifyCollectionChangedAction.Remove, NotifyCollectionChangedAction.Remove]),
+        "filtering performed changes other than removing excluded rows");
+}
+
+static void ListReorderingPreservesRows()
+{
+    var rows = new IssueListCollection();
+    rows.Synchronize([ListIssue(1, "First"), ListIssue(2, "Second")]);
+    var first = rows[0];
+    var second = rows[1];
+    var actions = new List<NotifyCollectionChangedAction>();
+    rows.CollectionChanged += (_, args) => actions.Add(args.Action);
+    rows.Synchronize([ListIssue(2, "Second"), ListIssue(3, "Third"), ListIssue(1, "First")]);
+    True(rows.Select(row => row.Id).SequenceEqual([2L, 3L, 1L]), "results were not in the requested order");
+    True(ReferenceEquals(second, rows[0]) && ReferenceEquals(first, rows[2]),
+        "reordering replaced surviving rows");
+    True(actions.SequenceEqual([NotifyCollectionChangedAction.Move, NotifyCollectionChangedAction.Add]),
+        "reordering performed unnecessary collection changes");
+}
+
+static void ListEmptyResultsWithoutReset()
+{
+    var rows = new IssueListCollection();
+    rows.Synchronize([ListIssue(1, "First")]);
+    var actions = new List<NotifyCollectionChangedAction>();
+    rows.CollectionChanged += (_, args) => actions.Add(args.Action);
+    rows.Synchronize([]);
+    Equal(0, rows.Count);
+    Equal(NotifyCollectionChangedAction.Remove, actions.Single());
+    rows.Synchronize([ListIssue(2, "Second")]);
+    Equal(2L, rows.Single().Id);
+}
+
+static void ListRowIdentity()
+{
+    var row = new IssueListItem(ListIssue(1, "First"));
+    Throws<ArgumentException>(() => row.Update(ListIssue(2, "Second")));
+    Equal(1L, row.Id);
+    Equal("First", row.Title);
 }
 
 static void True(bool condition, string message)

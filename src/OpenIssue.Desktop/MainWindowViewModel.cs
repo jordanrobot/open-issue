@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -69,7 +68,11 @@ public sealed partial class MainWindowViewModel : ObservableObject
         SelectedIssuePriority = IssuePriorityOptions.First(choice => choice.Value == "normal");
     }
 
-    public ObservableCollection<Issue> Issues { get; } = [];
+    public IssueListCollection Issues { get; } = [];
+
+    /// <summary>Gets the stable list row corresponding to the selected issue snapshot.</summary>
+    public IssueListItem? SelectedIssueListItem =>
+        Issues.FirstOrDefault(row => row.Id == SelectedIssue?.Id);
 
     public IReadOnlyList<FilterChoice> StatusFilterOptions { get; }
 
@@ -149,6 +152,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(IsEditorEnabled))]
     [NotifyPropertyChangedFor(nameof(IsDeleteEnabled))]
     [NotifyPropertyChangedFor(nameof(MetadataText))]
+    [NotifyPropertyChangedFor(nameof(SelectedIssueListItem))]
     public partial Issue? SelectedIssue { get; set; }
 
     [ObservableProperty]
@@ -258,15 +262,11 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 _knownRevisions[issue.Id] = issue.Revision;
             }
 
-            Issues.Clear();
-            foreach (var issue in result.Matches)
-            {
-                Issues.Add(issue);
-            }
+            Issues.Synchronize(result.Matches);
 
             var selected = currentId is null
                 ? null
-                : Issues.FirstOrDefault(issue => issue.Id == currentId);
+                : Issues.FirstOrDefault(row => row.Id == currentId)?.Issue;
             if (preserveCurrentEditor &&
                 selected is not null &&
                 string.Equals(selected.Revision, currentRevision, StringComparison.Ordinal))
@@ -275,7 +275,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             }
             else
             {
-                LoadIssue(selected ?? Issues.FirstOrDefault());
+                LoadIssue(selected ?? Issues.FirstOrDefault()?.Issue);
             }
 
             StatusMessage = result.Listed.Diagnostics.Count == 0
@@ -539,10 +539,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
         var issue = await Task.Run(() => service.Create(string.Empty, string.Empty));
         await RefreshIssuesAsync(preserveCurrentEditor: true);
-        var created = Issues.FirstOrDefault(candidate => candidate.Id == issue.Id) ?? issue;
+        var created = Issues.FirstOrDefault(candidate => candidate.Id == issue.Id)?.Issue ?? issue;
         if (!Issues.Any(candidate => candidate.Id == issue.Id))
         {
-            Issues.Add(created);
+            Issues.Add(new IssueListItem(created));
         }
 
         LoadIssue(created);
@@ -622,7 +622,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             return;
         }
 
-        Issues[Issues.IndexOf(existing)] = issue;
+        existing.Update(issue);
     }
 
     private string[] EditorTags() =>
