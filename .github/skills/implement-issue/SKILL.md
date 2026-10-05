@@ -1,11 +1,11 @@
 ---
 name: implement-issue
-description: 'Implements a user-selected repository issue from `.issues/issues/`, validates the code changes, updates Markdown task checkboxes, and closes fully completed issues. Use when asked to implement, fix, or work on an issue by number such as `implement #3` or by providing its issue Markdown file.'
+description: 'Implements a user-selected repository issue from `.issues/issues/`, validates the code changes, updates Markdown task checkboxes, and leaves the issue open for user integration testing and manual closure. Use when asked to implement, fix, or work on an issue by number such as `implement #3` or by providing its issue Markdown file.'
 ---
 
 # Implement a Repository Issue
 
-Use the selected issue document as the task specification: implement its requirements in the repository, verify the result, update its task checkboxes, and close it only when the work is complete.
+Use the selected issue document as the task specification: implement its requirements in the repository, verify the result, update its task checkboxes, and leave the issue open for user integration testing and manual closure.
 
 ## When to Use This Skill
 
@@ -39,18 +39,18 @@ Use the selected issue document as the task specification: implement its require
   - For parent checkboxes, use `[x]` only when all nested requirements are complete; use `[/]` if any nested requirement is partial.
 - Preserve the issue's wording, ordering, and unrelated metadata. Do not mark an unverified requirement complete.
 
-### 4. Close only fully completed issues
+### 4. Leave the issue open
 
-- After implementation and validation, set the issue's existing frontmatter `status` to `closed` only if every requirement is complete and confirmed, with no partial checkboxes.
-- Preserve the file's existing frontmatter format and all unrelated fields. These repository issue files use YAML frontmatter, so update the YAML `status` field rather than converting it to JSON.
-- If any requirement remains incomplete, blocked, or unverified, do not close the issue. Leave its status unchanged and explain the remaining work.
+- Never set the issue's frontmatter `status` to `closed` or otherwise close the issue, even if implementation and local validation are complete.
+- Preserve the existing issue status and all unrelated frontmatter.
+- The user must perform integration testing and manually close the issue after confirming the result.
 
 ## Gotchas
 
 - **Do not match an ID by an unbounded filename prefix.** Require an exact numeric ID followed by `.md`, `-`, or `_`, and confirm the frontmatter ID when present.
 - **Do not close an issue just because its checkboxes were already checked.** Confirm the implementation and run relevant validation before treating those requirements as complete.
-- **Do not mark the issue closed when any requirement is partial.** A `[/]` checkbox means the issue is not fully complete.
+- **Do not close the issue from this skill.** Local checks do not replace the user's integration testing and manual closure.
 
 ## Completion Response
 
-Summarize the implementation, checks run and their results, and any partial or blocked requirements. Link to the issue file and changed files when useful. State explicitly if the issue was closed or left open.
+Summarize the implementation, checks run and their results, and any partial or blocked requirements. Link to the issue file and changed files when useful. State explicitly that the issue was left open for the user's integration testing and manual closure.
