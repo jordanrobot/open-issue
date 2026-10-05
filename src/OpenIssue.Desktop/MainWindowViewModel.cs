@@ -519,7 +519,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task CreateIssueAsync(string title)
+    private async Task CreateIssueAsync()
     {
         var service = _service;
         if (service is null)
@@ -527,10 +527,19 @@ public sealed partial class MainWindowViewModel : ObservableObject
             return;
         }
 
-        var issue = await Task.Run(() => service.Create(title, string.Empty));
+        SearchText = string.Empty;
+        SelectedStatusFilter = StatusFilterOptions[0];
+        SelectedPriorityFilter = PriorityFilterOptions[0];
+        ReadyOnly = false;
+
+        var issue = await Task.Run(() => service.Create(string.Empty, string.Empty));
         await RefreshIssuesAsync(preserveCurrentEditor: true);
         var created = Issues.FirstOrDefault(candidate => candidate.Id == issue.Id) ?? issue;
-        ReplaceIssueInList(created);
+        if (!Issues.Any(candidate => candidate.Id == issue.Id))
+        {
+            Issues.Add(created);
+        }
+
         LoadIssue(created);
     }
 

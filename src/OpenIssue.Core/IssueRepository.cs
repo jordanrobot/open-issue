@@ -548,7 +548,8 @@ public sealed class IssueRepository(string projectRoot)
             throw new IssueException("Issue status or priority is invalid.");
         }
 
-        if (string.IsNullOrWhiteSpace(issue.Title))
+        var titleMayBeEmpty = issue.Draft && issue.Title is { Length: 0 };
+        if (string.IsNullOrWhiteSpace(issue.Title) && !titleMayBeEmpty)
         {
             throw new IssueException("Issue title cannot be empty.");
         }

@@ -434,57 +434,10 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var titleBox = new TextBox
-        {
-            Header = GetString("NewIssueTitleLabel"),
-            PlaceholderText = GetString("TitleBox.PlaceholderText")
-        };
-        AutomationProperties.SetAutomationId(titleBox, "NewIssueTitle");
-        AutomationProperties.SetName(titleBox, GetString("NewIssueTitleLabel"));
-
-        var validationMessage = new TextBlock();
-        var content = new StackPanel { Spacing = 8 };
-        content.Children.Add(titleBox);
-        content.Children.Add(validationMessage);
-        titleBox.TextChanged += (_, _) =>
-        {
-            if (!string.IsNullOrWhiteSpace(titleBox.Text))
-            {
-                validationMessage.Text = string.Empty;
-            }
-        };
-
-        var dialog = new ContentDialog
-        {
-            Title = GetString("DialogNewIssueTitle"),
-            Content = content,
-            PrimaryButtonText = GetString("ButtonCreate"),
-            CloseButtonText = GetString("ButtonCancel"),
-            DefaultButton = ContentDialogButton.Primary,
-            XamlRoot = RootGrid.XamlRoot
-        };
-        AutomationProperties.SetAutomationId(dialog, "NewIssueDialog");
-        AutomationProperties.SetName(dialog, GetString("DialogNewIssueTitle"));
-        dialog.PrimaryButtonClick += (_, args) =>
-        {
-            if (string.IsNullOrWhiteSpace(titleBox.Text))
-            {
-                args.Cancel = true;
-                validationMessage.Text = GetString("MessageIssueTitleCannotBeEmpty");
-                titleBox.Focus(FocusState.Programmatic);
-            }
-        };
-
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
-        {
-            return;
-        }
-
         try
         {
-            await ViewModel.CreateIssueCommand.ExecuteAsync(titleBox.Text);
+            await ViewModel.CreateIssueCommand.ExecuteAsync(null);
             TitleBox.Focus(FocusState.Programmatic);
-            TitleBox.SelectAll();
         }
         catch (Exception exception) when (exception is IssueException or IOException or UnauthorizedAccessException)
         {

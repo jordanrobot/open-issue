@@ -210,20 +210,8 @@
   <data name="ButtonDelete" xml:space="preserve">
     <value>Delete</value>
   </data>
-  <data name="DialogNewIssueTitle" xml:space="preserve">
-    <value>New issue</value>
-  </data>
-  <data name="NewIssueTitleLabel" xml:space="preserve">
-    <value>Issue title</value>
-  </data>
-  <data name="ButtonCreate" xml:space="preserve">
-    <value>Create</value>
-  </data>
   <data name="ButtonOk" xml:space="preserve">
     <value>OK</value>
-  </data>
-  <data name="MessageIssueTitleCannotBeEmpty" xml:space="preserve">
-    <value>Issue title cannot be empty.</value>
   </data>
   <data name="MessageSelectProjectConfiguration" xml:space="preserve">
     <value>Select an Open Issue project's .issues/config.json file.</value>

@@ -23,7 +23,7 @@ Each issue is stored as `.issues/issues/<id>.md`, UTF-8 Markdown with a YAML fro
 | --- | --- | --- |
 | `schema` | integer | New files use `3`; schema `2` files remain readable. |
 | `id` | integer | Positive numeric ID and equal to the filename. |
-| `title` | string | Nonempty, single line. |
+| `title` | string | Single line; may be empty only while the issue is a draft. |
 | `status` | string | `open`, `closed`, or `declined`. |
 | `draft` | boolean | Required; newly created issues default to true. |
 | `priority` | string | `low`, `normal`, `high`, or `urgent`. |
@@ -61,7 +61,7 @@ blocks: []
 Document the public API for consumers.
 ```
 
-New issues start as drafts (`draft: true`) with an empty body by default. Schema 2 files with `ready` are read with the inverse value and upgraded to schema 3 on their next write. In the desktop editor, unchecking Draft marks an issue ready. Issue bodies are freeform Markdown; no headings, sections, or body content are required. Readiness is independent of status; `next` selects only open, ready, unblocked issues. Readiness authorizes selection by `next`, not autonomous implementation.
+New issues start as drafts (`draft: true`) with an empty title and body by default. A draft may keep an empty title while it is being authored; a title is required before marking it ready. Schema 2 files with `ready` are read with the inverse value and upgraded to schema 3 on their next write. In the desktop editor, unchecking Draft marks an issue ready. Issue bodies are freeform Markdown; no headings, sections, or body content are required. Readiness is independent of status; `next` selects only open, ready, unblocked issues. Readiness authorizes selection by `next`, not autonomous implementation.
 
 New issues record the creating operating-system username in `created_by`; existing issues without that field have unknown attribution. The desktop editor shows the creator plus creation and last-edit timestamps in the system's local time zone, with the offset displayed. Timestamps remain UTC ISO 8601 in frontmatter.
 

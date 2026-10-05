@@ -8,6 +8,7 @@ var tests = new (string Name, Action Run)[]
     ("issue creation, listing, search, and Unicode", IssueOperations),
     ("creator and timestamp metadata is persisted and immutable", IssueMetadata),
     ("new issues are drafts by default", DraftByDefault),
+    ("blank draft titles can be completed before readiness", BlankDraftTitles),
     ("legacy ready values map to draft values", LegacyReadyMetadata),
     ("numeric issue IDs are allocated without collisions", NumericIdAllocation),
     ("deleting an issue preserves its ID high-water mark", IssueDeletion),
@@ -151,6 +152,29 @@ static void DraftByDefault()
     True(issueFile.Contains("schema: 3", StringComparison.Ordinal), "new issue did not use the current schema");
     True(issueFile.Contains("draft: true", StringComparison.Ordinal), "new issue was not persisted as a draft");
     True(!issueFile.Contains("ready:", StringComparison.Ordinal), "new issue still uses the legacy ready field");
+}
+
+static void BlankDraftTitles()
+{
+    using var project = new TemporaryProject();
+    var service = project.Service;
+    var issue = service.Create(string.Empty, string.Empty);
+
+    True(issue.Draft, "a blank issue should remain a draft");
+    Equal(string.Empty, issue.Title);
+    Equal(string.Empty, service.Show(issue.Id.ToString(System.Globalization.CultureInfo.InvariantCulture)).Title);
+    Equal(string.Empty, service.List().Issues.Single().Title);
+    Throws<IssueException>(() => service.SetDraft(
+        issue.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        draft: false));
+    Throws<IssueException>(() => service.Create(" ", string.Empty));
+
+    var completed = service.Edit(
+        issue.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        title: "Completed issue",
+        draft: false);
+    Equal("Completed issue", completed.Title);
+    True(!completed.Draft, "a titled issue should be markable as ready");
 }
 
 static void LegacyReadyMetadata()
