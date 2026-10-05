@@ -138,6 +138,42 @@ public sealed class IssueService(IssueRepository repository)
         return Repository.Update(current, expectedRevision ?? current.Revision);
     }
 
+    /// <summary>Adds parent issue references without removing existing parents.</summary>
+    /// <param name="idOrPrefix">The issue ID to update.</param>
+    /// <param name="parentIds">The parent issue IDs to add.</param>
+    /// <param name="expectedRevision">The revision the caller edited, when optimistic concurrency is required.</param>
+    /// <returns>The updated issue, or the current issue when no new parent IDs were supplied.</returns>
+    public Issue AddParents(
+        string idOrPrefix,
+        IEnumerable<long> parentIds,
+        string? expectedRevision = null)
+    {
+        ArgumentNullException.ThrowIfNull(parentIds);
+        var current = Resolve(idOrPrefix);
+        var parents = current.Parents.Concat(parentIds).Distinct().ToArray();
+        return parents.SequenceEqual(current.Parents)
+            ? current
+            : Edit(idOrPrefix, parents: parents, expectedRevision: expectedRevision ?? current.Revision);
+    }
+
+    /// <summary>Adds child issue references without removing existing children.</summary>
+    /// <param name="idOrPrefix">The issue ID to update.</param>
+    /// <param name="childIds">The child issue IDs to add.</param>
+    /// <param name="expectedRevision">The revision the caller edited, when optimistic concurrency is required.</param>
+    /// <returns>The updated issue, or the current issue when no new child IDs were supplied.</returns>
+    public Issue AddChildren(
+        string idOrPrefix,
+        IEnumerable<long> childIds,
+        string? expectedRevision = null)
+    {
+        ArgumentNullException.ThrowIfNull(childIds);
+        var current = Resolve(idOrPrefix);
+        var children = current.Children.Concat(childIds).Distinct().ToArray();
+        return children.SequenceEqual(current.Children)
+            ? current
+            : Edit(idOrPrefix, children: children, expectedRevision: expectedRevision ?? current.Revision);
+    }
+
     public Issue SetStatus(string idOrPrefix, IssueStatus status)
     {
         var current = Resolve(idOrPrefix);

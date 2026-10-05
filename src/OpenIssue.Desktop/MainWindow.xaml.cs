@@ -30,6 +30,9 @@ public sealed partial class MainWindow : Window
     private bool _allowClose;
     private bool _refreshInProgress;
     private bool _refreshQueued;
+    private bool _suppressIssueReferenceSuggestions;
+    private int _issueReferenceStart = -1;
+    private int _issueReferenceLength;
     private readonly string? _launchArguments;
 
     public MainWindowViewModel ViewModel { get; }
@@ -40,6 +43,12 @@ public sealed partial class MainWindow : Window
     /// <returns>Visible when no issues are shown and a refresh is not in progress.</returns>
     public static Visibility EmptyStateVisibility(int issueCount, bool isRefreshing) =>
         issueCount == 0 && !isRefreshing ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>Determines whether the issue-reference suggestions list should be shown.</summary>
+    /// <param name="hasSuggestions">Whether autocomplete suggestions are available.</param>
+    /// <returns>Visible when suggestions are available.</returns>
+    public static Visibility SuggestionVisibility(bool hasSuggestions) =>
+        hasSuggestions ? Visibility.Visible : Visibility.Collapsed;
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint GetDpiForWindow(nint hwnd);
@@ -392,6 +401,116 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private async void AddParentIssuesButton_Click(object sender, RoutedEventArgs e) =>
+        await AddIssueRelationshipsAsync(addingParents: true);
+
+    private async void AddChildIssuesButton_Click(object sender, RoutedEventArgs e) =>
+        await AddIssueRelationshipsAsync(addingParents: false);
+
+    private async Task AddIssueRelationshipsAsync(bool addingParents)
+    {
+        if (ViewModel.SelectedIssue is null || !await ConfirmLeaveCurrentAsync())
+        {
+            return;
+        }
+
+        try
+        {
+            var candidates = await ViewModel.GetOpenIssueCandidatesAsync(addingParents);
+            if (candidates.Count == 0)
+            {
+                await ShowMessageAsync(
+                    GetString("DialogNoOpenIssuesTitle"),
+                    GetString("DialogNoOpenIssuesMessage"));
+                return;
+            }
+
+            var relationshipName = GetString(addingParents ? "ParentIssueLinkRole" : "ChildIssueLinkRole");
+            var title = GetString(addingParents ? "DialogAddParentIssuesTitle" : "DialogAddChildIssuesTitle");
+            var selectedIds = await ShowIssueSelectionDialogAsync(
+                title,
+                Format("DialogSelectOpenIssuesFormat", relationshipName),
+                candidates,
+                addingParents ? "AddParentIssueSelectionDialog" : "AddChildIssueSelectionDialog");
+            if (selectedIds is not { Count: > 0 })
+            {
+                return;
+            }
+
+            if (addingParents)
+            {
+                await ViewModel.AddParentIssuesAsync(selectedIds);
+            }
+            else
+            {
+                await ViewModel.AddChildIssuesAsync(selectedIds);
+            }
+        }
+        catch (Exception exception) when (exception is IssueException or IOException or UnauthorizedAccessException)
+        {
+            await ShowMessageAsync(GetString("MessageCannotUpdateIssueLinksTitle"), exception.Message);
+        }
+    }
+
+    private async Task<IReadOnlyList<long>?> ShowIssueSelectionDialogAsync(
+        string title,
+        string instruction,
+        IReadOnlyList<Issue> candidates,
+        string automationId)
+    {
+        var selectionList = new ListView
+        {
+            MaxHeight = 320,
+            SelectionMode = ListViewSelectionMode.Multiple
+        };
+        AutomationProperties.SetAutomationId(selectionList, "IssueLinkSelectionList");
+        AutomationProperties.SetName(selectionList, title);
+        foreach (var issue in candidates)
+        {
+            var label = MainWindowViewModel.FormatIssueLabel(issue.Id, issue.Title);
+            var item = new ListViewItem
+            {
+                Content = label,
+                Tag = issue.Id
+            };
+            AutomationProperties.SetAutomationId(item, $"IssueLinkOption{issue.Id.ToString(CultureInfo.InvariantCulture)}");
+            AutomationProperties.SetName(item, label);
+            selectionList.Items.Add(item);
+        }
+
+        var content = new StackPanel { Spacing = 8 };
+        content.Children.Add(new TextBlock
+        {
+            Text = instruction,
+            TextWrapping = TextWrapping.Wrap
+        });
+        content.Children.Add(selectionList);
+
+        var dialog = new ContentDialog
+        {
+            Title = title,
+            Content = content,
+            PrimaryButtonText = GetString("ButtonAddSelectedIssues"),
+            CloseButtonText = GetString("ButtonCancel"),
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = RootGrid.XamlRoot
+        };
+        AutomationProperties.SetAutomationId(dialog, automationId);
+        AutomationProperties.SetName(dialog, title);
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return null;
+        }
+
+        return selectionList.SelectedItems
+            .OfType<ListViewItem>()
+            .Select(item => item.Tag)
+            .OfType<long>()
+            .Distinct()
+            .Order()
+            .ToArray();
+    }
+
     private async Task DeleteIssueAsync(Issue issue)
     {
         var answer = await ShowConfirmationAsync(
@@ -454,8 +573,104 @@ public sealed partial class MainWindow : Window
         _saveTimer.Start();
     }
 
+    private void BodyBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (ViewModel.IsLoadingIssue || ViewModel.SelectedIssue is null)
+        {
+            ViewModel.ClearIssueReferenceSuggestions();
+            return;
+        }
+
+        Editor_Changed(sender, e);
+        if (_suppressIssueReferenceSuggestions ||
+            sender is not TextBox textBox ||
+            textBox.SelectionLength != 0 ||
+            !IssueBodyLinkParser.TryGetReferenceAtCaret(
+                textBox.Text,
+                textBox.SelectionStart,
+                out var start,
+                out var length,
+                out var prefix))
+        {
+            ViewModel.ClearIssueReferenceSuggestions();
+            return;
+        }
+
+        _issueReferenceStart = start;
+        _issueReferenceLength = length;
+        ViewModel.UpdateIssueReferenceSuggestions(prefix);
+        IssueReferenceSuggestionsList.SelectedIndex =
+            ViewModel.IssueReferenceSuggestions.Count > 0 ? 0 : -1;
+    }
+
+    private void IssueReferenceSuggestionsList_ItemClick(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is IssueListItem suggestion)
+        {
+            ApplyIssueReferenceSuggestion(suggestion);
+        }
+    }
+
+    private void ApplyIssueReferenceSuggestion(IssueListItem suggestion)
+    {
+        if (!IssueBodyLinkParser.TryReplaceReference(
+                BodyBox.Text,
+                _issueReferenceStart,
+                _issueReferenceLength,
+                suggestion.Id,
+                out var updatedBody,
+                out var caretIndex))
+        {
+            ViewModel.ClearIssueReferenceSuggestions();
+            return;
+        }
+
+        _suppressIssueReferenceSuggestions = true;
+        try
+        {
+            BodyBox.Text = updatedBody;
+            ViewModel.IssueBody = updatedBody;
+            BodyBox.SelectionStart = caretIndex;
+            BodyBox.SelectionLength = 0;
+        }
+        finally
+        {
+            _suppressIssueReferenceSuggestions = false;
+        }
+
+        ViewModel.ClearIssueReferenceSuggestions();
+        BodyBox.Focus(FocusState.Programmatic);
+    }
+
     private void BodyBox_KeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
     {
+        if (ViewModel.HasIssueReferenceSuggestions)
+        {
+            switch (e.Key)
+            {
+                case VirtualKey.Down:
+                    IssueReferenceSuggestionsList.SelectedIndex = Math.Min(
+                        IssueReferenceSuggestionsList.SelectedIndex + 1,
+                        ViewModel.IssueReferenceSuggestions.Count - 1);
+                    e.Handled = true;
+                    return;
+                case VirtualKey.Up:
+                    IssueReferenceSuggestionsList.SelectedIndex = Math.Max(
+                        IssueReferenceSuggestionsList.SelectedIndex - 1,
+                        0);
+                    e.Handled = true;
+                    return;
+                case VirtualKey.Enter when IssueReferenceSuggestionsList.SelectedItem is IssueListItem suggestion:
+                    ApplyIssueReferenceSuggestion(suggestion);
+                    e.Handled = true;
+                    return;
+                case VirtualKey.Escape:
+                    ViewModel.ClearIssueReferenceSuggestions();
+                    e.Handled = true;
+                    return;
+            }
+        }
+
         if (e.Key != VirtualKey.Tab || sender is not TextBox textBox)
         {
             return;

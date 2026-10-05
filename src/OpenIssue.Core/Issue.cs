@@ -31,6 +31,8 @@ public sealed class Issue
     public List<long> Related { get; set; } = [];
     public List<long> Blocks { get; set; } = [];
     public required string Body { get; set; }
+    /// <summary>Gets dependency issue IDs parsed from <see cref="Body"/> using the “Depends on #number” syntax.</summary>
+    public IReadOnlyList<long> Dependencies => IssueBodyLinkParser.GetDependencies(Body);
     public string Revision { get; internal set; } = "";
     internal YamlDotNet.RepresentationModel.YamlMappingNode? Frontmatter { get; set; }
     internal string LineEnding { get; set; } = "\n";

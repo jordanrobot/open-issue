@@ -202,6 +202,7 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
@@ -275,30 +276,91 @@
                         IsEnabled="{x:Bind ViewModel.IsEditorEnabled, Mode=OneWay}"
                         AutomationProperties.AutomationId="IssueDraft" />
                 </StackPanel>
-                <TextBox
-                    x:Name="TagsBox"
-                    x:Uid="TagsBox"
+                <StackPanel
                     Grid.Row="4"
                     Margin="0,0,0,12"
-                    Text="{x:Bind ViewModel.IssueTags, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                    TextChanged="Editor_Changed"
-                    IsEnabled="{x:Bind ViewModel.IsEditorEnabled, Mode=OneWay}"
-                    AutomationProperties.AutomationId="IssueTags" />
+                    Spacing="8">
+                    <TextBox
+                        x:Name="TagsBox"
+                        x:Uid="TagsBox"
+                        Text="{x:Bind ViewModel.IssueTags, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                        TextChanged="Editor_Changed"
+                        IsEnabled="{x:Bind ViewModel.IsEditorEnabled, Mode=OneWay}"
+                        AutomationProperties.AutomationId="IssueTags" />
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock
+                            Text="{x:Bind ViewModel.ParentIssuesText, Mode=OneWay}"
+                            TextWrapping="Wrap"
+                            VerticalAlignment="Center"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <Button
+                            x:Name="AddParentIssuesButton"
+                            x:Uid="AddParentIssuesButton"
+                            Grid.Column="1"
+                            Click="AddParentIssuesButton_Click"
+                            IsEnabled="{x:Bind ViewModel.IsEditorEnabled, Mode=OneWay}"
+                            AutomationProperties.AutomationId="AddParentIssuesButton" />
+                    </Grid>
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock
+                            Text="{x:Bind ViewModel.ChildIssuesText, Mode=OneWay}"
+                            TextWrapping="Wrap"
+                            VerticalAlignment="Center"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <Button
+                            x:Name="AddChildIssuesButton"
+                            x:Uid="AddChildIssuesButton"
+                            Grid.Column="1"
+                            Click="AddChildIssuesButton_Click"
+                            IsEnabled="{x:Bind ViewModel.IsEditorEnabled, Mode=OneWay}"
+                            AutomationProperties.AutomationId="AddChildIssuesButton" />
+                    </Grid>
+                </StackPanel>
+                <ListView
+                    x:Name="IssueReferenceSuggestionsList"
+                    Grid.Row="5"
+                    Margin="0,0,0,8"
+                    MaxHeight="144"
+                    SelectionMode="Single"
+                    IsItemClickEnabled="True"
+                    ItemsSource="{x:Bind ViewModel.IssueReferenceSuggestions, Mode=OneWay}"
+                    ItemClick="IssueReferenceSuggestionsList_ItemClick"
+                    Visibility="{x:Bind local:MainWindow.SuggestionVisibility(ViewModel.HasIssueReferenceSuggestions), Mode=OneWay}"
+                    AutomationProperties.AutomationId="IssueReferenceSuggestions"
+                    AutomationProperties.Name="{x:Bind ViewModel.IssueReferenceSuggestionsAutomationName, Mode=OneTime}">
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="local:IssueListItem">
+                            <TextBlock
+                                Text="{x:Bind local:MainWindowViewModel.FormatIssueLabel(Id, Title), Mode=OneWay}"
+                                TextTrimming="CharacterEllipsis" />
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
                 <TextBox
                     x:Name="BodyBox"
                     x:Uid="BodyBox"
-                    Grid.Row="5"
+                    Grid.Row="6"
                     AcceptsReturn="True"
                     TextWrapping="Wrap"
                     ScrollViewer.VerticalScrollBarVisibility="Auto"
                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                     Text="{x:Bind ViewModel.IssueBody, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                    TextChanged="Editor_Changed"
+                    TextChanged="BodyBox_TextChanged"
                     KeyDown="BodyBox_KeyDown"
                     IsEnabled="{x:Bind ViewModel.IsEditorEnabled, Mode=OneWay}"
                     AutomationProperties.AutomationId="IssueBody" />
                 <StackPanel
-                    Grid.Row="6"
+                    Grid.Row="7"
                     Margin="0,12,0,0"
                     Orientation="Horizontal"
                     Spacing="8">

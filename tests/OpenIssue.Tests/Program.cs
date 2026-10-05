@@ -8,6 +8,8 @@ var tests = new (string Name, Action Run)[]
     ("nested projects are isolated", NestedProjectIsolation),
     ("dangling project symlinks cannot fall through to a parent project", DanglingProjectLink),
     ("issue creation, listing, search, and Unicode", IssueOperations),
+    ("issue-body references and dependencies are parsed", IssueBodyLinks),
+    ("parent and child links can be added", IssueRelationshipLinks),
     ("creator and timestamp metadata is persisted and immutable", IssueMetadata),
     ("new issues are drafts by default", DraftByDefault),
     ("blank draft titles can be completed before readiness", BlankDraftTitles),
@@ -114,6 +116,67 @@ static void IssueOperations()
     Equal(child.Id, service.Show(issue.Id.ToString()).Children.Single());
     service.Edit(child.Id.ToString(), parents: [issue.Id]);
     Equal(issue.Id, service.Show(child.Id.ToString()).Parents.Single());
+}
+
+static void IssueBodyLinks()
+{
+    const string body = "See #12 and #5; avoid ##2.\nDepends on #5\n- depends on #12\n";
+    Equal("12,5", string.Join(',', IssueBodyLinkParser.GetReferences(body)));
+    Equal("5,12", string.Join(',', IssueBodyLinkParser.GetDependencies(body)));
+
+    const string textWithReference = "Before #12 after";
+    True(IssueBodyLinkParser.TryReplaceReference(
+            textWithReference,
+            7,
+            3,
+            123,
+            out var updatedText,
+            out var caretIndex),
+        "issue reference could not be replaced");
+    Equal("Before #123 after", updatedText);
+    Equal(11, caretIndex);
+
+    using var project = new TemporaryProject();
+    var issue = project.Service.Create("Dependencies", body);
+    Equal("5,12", string.Join(',', issue.Dependencies));
+
+    const string token = "Depends on #12";
+    True(IssueBodyLinkParser.TryGetReferenceAtCaret(
+            token,
+            token.Length,
+            out var start,
+            out var length,
+            out var prefix),
+        "issue reference token was not found at the caret");
+    Equal(token.LastIndexOf('#'), start);
+    Equal(3, length);
+    Equal("12", prefix);
+    True(!IssueBodyLinkParser.TryGetReferenceAtCaret("# heading", 1, out _, out _, out _),
+        "a Markdown heading was treated as an issue reference");
+
+    var suggestions = IssueBodyLinkParser.SuggestIssues(
+        [ListIssue(13, "Thirteen"), ListIssue(12, "Twelve"), ListIssue(2, "Two"), ListIssue(123, "One twenty-three")],
+        "12",
+        3);
+    Equal("12,123,13", string.Join(',', suggestions.Select(suggestion => suggestion.Id)));
+}
+
+static void IssueRelationshipLinks()
+{
+    using var project = new TemporaryProject();
+    var service = project.Service;
+    var parent = service.Create("Parent", "Draft");
+    var secondParent = service.Create("Second parent", "Draft");
+    var child = service.Create("Child", "Draft");
+
+    service.AddParents(child.Id.ToString(), [parent.Id, secondParent.Id, parent.Id]);
+    Equal($"{parent.Id},{secondParent.Id}", string.Join(',', service.Show(child.Id.ToString()).Parents));
+    service.AddParents(child.Id.ToString(), [parent.Id]);
+    Equal(2, service.Show(child.Id.ToString()).Parents.Count);
+
+    service.AddChildren(parent.Id.ToString(), [child.Id]);
+    Equal(child.Id.ToString(), string.Join(',', service.Show(parent.Id.ToString()).Children));
+    Throws<IssueException>(() => service.AddChildren(parent.Id.ToString(), [long.MaxValue]));
 }
 
 static void IssueMetadata()

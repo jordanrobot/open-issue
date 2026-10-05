@@ -81,6 +81,12 @@
   <data name="DeleteIssueButton.Content" xml:space="preserve">
     <value>Delete</value>
   </data>
+  <data name="AddParentIssuesButton.Content" xml:space="preserve">
+    <value>Add parent(s)</value>
+  </data>
+  <data name="AddChildIssuesButton.Content" xml:space="preserve">
+    <value>Add child</value>
+  </data>
   <data name="IssueListName" xml:space="preserve">
     <value>Issues</value>
   </data>
@@ -95,6 +101,9 @@
   </data>
   <data name="IssueListSplitterName" xml:space="preserve">
     <value>Resize the issue list pane</value>
+  </data>
+  <data name="IssueReferenceSuggestionsAutomationName" xml:space="preserve">
+    <value>Issue reference suggestions</value>
   </data>
   <data name="TitleBox.Header" xml:space="preserve">
     <value>Issue title</value>
@@ -121,7 +130,16 @@
     <value>Issue body</value>
   </data>
   <data name="BodyBox.PlaceholderText" xml:space="preserve">
-    <value>Describe the issue here.</value>
+    <value>Describe the issue here. Use #number to reference an issue, or Depends on #number to mark a dependency.</value>
+  </data>
+  <data name="ParentIssuesFormat" xml:space="preserve">
+    <value>Parents: {0}</value>
+  </data>
+  <data name="ChildIssuesFormat" xml:space="preserve">
+    <value>Children: {0}</value>
+  </data>
+  <data name="NoIssueRelationships" xml:space="preserve">
+    <value>None</value>
   </data>
   <data name="SelectIssuePrompt" xml:space="preserve">
     <value>Select an issue or create one to begin editing.</value>
@@ -218,6 +236,36 @@
   </data>
   <data name="ButtonCancel" xml:space="preserve">
     <value>Cancel</value>
+  </data>
+  <data name="DialogAddParentIssuesTitle" xml:space="preserve">
+    <value>Add parent issues</value>
+  </data>
+  <data name="DialogAddChildIssuesTitle" xml:space="preserve">
+    <value>Add child issues</value>
+  </data>
+  <data name="DialogSelectOpenIssuesFormat" xml:space="preserve">
+    <value>Select one or more open issues to add as {0}.</value>
+  </data>
+  <data name="ParentIssueLinkRole" xml:space="preserve">
+    <value>parent</value>
+  </data>
+  <data name="ChildIssueLinkRole" xml:space="preserve">
+    <value>child</value>
+  </data>
+  <data name="ButtonAddSelectedIssues" xml:space="preserve">
+    <value>Add selected</value>
+  </data>
+  <data name="DialogNoOpenIssuesTitle" xml:space="preserve">
+    <value>No available issues</value>
+  </data>
+  <data name="DialogNoOpenIssuesMessage" xml:space="preserve">
+    <value>There are no other open issues available to link.</value>
+  </data>
+  <data name="MessageCannotUpdateIssueLinksTitle" xml:space="preserve">
+    <value>Cannot update issue links</value>
+  </data>
+  <data name="MessageIssueLinksSaved" xml:space="preserve">
+    <value>Issue links saved.</value>
   </data>
   <data name="DialogDeleteIssueTitle" xml:space="preserve">
     <value>Delete issue</value>

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.IO;
+using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Windows.ApplicationModel.Resources;
@@ -30,6 +31,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private readonly ResourceLoader _resources = new();
     private readonly Dictionary<long, string> _knownRevisions = [];
     private readonly SemaphoreSlim _saveGate = new(1, 1);
+    private IReadOnlyList<Issue> _availableIssues = [];
     private IssueService? _service;
     private CancellationTokenSource? _refreshCancellation;
     private long _refreshVersion;
@@ -70,6 +72,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     public IssueListCollection Issues { get; } = [];
 
+    public ObservableCollection<IssueListItem> IssueReferenceSuggestions { get; } = [];
+
     /// <summary>Gets the stable list row corresponding to the selected issue snapshot.</summary>
     public IssueListItem? SelectedIssueListItem =>
         Issues.FirstOrDefault(row => row.Id == SelectedIssue?.Id);
@@ -98,11 +102,19 @@ public sealed partial class MainWindowViewModel : ObservableObject
             SelectedIssue.CreatedAt.ToLocalTime().ToString("g", CultureInfo.CurrentCulture),
             SelectedIssue.UpdatedAt.ToLocalTime().ToString("g", CultureInfo.CurrentCulture));
 
+    public string ParentIssuesText =>
+        Format("ParentIssuesFormat", FormatIssueRelationships(SelectedIssue?.Parents));
+
+    public string ChildIssuesText =>
+        Format("ChildIssuesFormat", FormatIssueRelationships(SelectedIssue?.Children));
+
     public string IssueListAutomationName => GetString("IssueListName");
 
     public string IssueListSplitterAutomationName => GetString("IssueListSplitterName");
 
     public string SearchBoxAutomationName => GetString("SearchBoxAutomationName");
+
+    public string IssueReferenceSuggestionsAutomationName => GetString("IssueReferenceSuggestionsAutomationName");
 
     public string LoadingAutomationName => GetString("LoadingIssuesAutomationName");
 
@@ -153,6 +165,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(IsDeleteEnabled))]
     [NotifyPropertyChangedFor(nameof(MetadataText))]
     [NotifyPropertyChangedFor(nameof(SelectedIssueListItem))]
+    [NotifyPropertyChangedFor(nameof(ParentIssuesText))]
+    [NotifyPropertyChangedFor(nameof(ChildIssuesText))]
     public partial Issue? SelectedIssue { get; set; }
 
     [ObservableProperty]
@@ -192,6 +206,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [ObservableProperty]
     public partial string StatusMessage { get; set; }
 
+    [ObservableProperty]
+    public partial bool HasIssueReferenceSuggestions { get; private set; }
+
     public async Task<string> InitializeProjectAsync(string root)
     {
         var issuesDirectory = await Task.Run(() =>
@@ -204,6 +221,82 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _service = new IssueService(new IssueRepository(root));
         ProjectRoot = root;
         return issuesDirectory;
+    }
+
+    /// <summary>Updates body autocomplete suggestions for the numeric prefix after a typed <c>#</c>.</summary>
+    /// <param name="idPrefix">Digits typed after the issue-reference marker.</param>
+    public void UpdateIssueReferenceSuggestions(string idPrefix)
+    {
+        IssueReferenceSuggestions.Clear();
+        foreach (var issue in IssueBodyLinkParser.SuggestIssues(_availableIssues, idPrefix))
+        {
+            IssueReferenceSuggestions.Add(new IssueListItem(issue));
+        }
+
+        HasIssueReferenceSuggestions = IssueReferenceSuggestions.Count > 0;
+    }
+
+    /// <summary>Clears the issue-reference autocomplete results.</summary>
+    public void ClearIssueReferenceSuggestions()
+    {
+        IssueReferenceSuggestions.Clear();
+        HasIssueReferenceSuggestions = false;
+    }
+
+    /// <summary>Lists unlinked open issues that can be added as parents or children of the selected issue.</summary>
+    /// <param name="addingParents"><see langword="true"/> to exclude existing parents; otherwise excludes existing children.</param>
+    /// <returns>Open issues other than the selected issue and its existing links.</returns>
+    public async Task<IReadOnlyList<Issue>> GetOpenIssueCandidatesAsync(bool addingParents)
+    {
+        var service = _service ?? throw new IssueException("The issue project has not been initialized.");
+        var current = SelectedIssue ?? throw new IssueException("Select an issue before adding issue links.");
+        var existingIds = (addingParents ? current.Parents : current.Children).ToHashSet();
+        return await Task.Run(() => service.List(new IssueFilter(Status: IssueStatus.Open)).Issues
+            .Where(issue => issue.Id != current.Id && !existingIds.Contains(issue.Id))
+            .OrderBy(issue => issue.Id)
+            .ToArray());
+    }
+
+    /// <summary>Adds parent relationships to the selected issue.</summary>
+    /// <param name="parentIds">The IDs selected by the user.</param>
+    public async Task AddParentIssuesAsync(IEnumerable<long> parentIds)
+    {
+        ArgumentNullException.ThrowIfNull(parentIds);
+        var service = _service ?? throw new IssueException("The issue project has not been initialized.");
+        var current = SelectedIssue ?? throw new IssueException("Select an issue before adding issue links.");
+        var additions = parentIds.Distinct().ToArray();
+        if (additions.Length == 0)
+        {
+            return;
+        }
+
+        var saved = await Task.Run(() => service.AddParents(
+            current.Id.ToString(CultureInfo.InvariantCulture),
+            additions,
+            current.Revision));
+        TrackSavedIssue(saved);
+        StatusMessage = GetString("MessageIssueLinksSaved");
+    }
+
+    /// <summary>Adds child relationships to the selected issue.</summary>
+    /// <param name="childIds">The IDs selected by the user.</param>
+    public async Task AddChildIssuesAsync(IEnumerable<long> childIds)
+    {
+        ArgumentNullException.ThrowIfNull(childIds);
+        var service = _service ?? throw new IssueException("The issue project has not been initialized.");
+        var current = SelectedIssue ?? throw new IssueException("Select an issue before adding issue links.");
+        var additions = childIds.Distinct().ToArray();
+        if (additions.Length == 0)
+        {
+            return;
+        }
+
+        var saved = await Task.Run(() => service.AddChildren(
+            current.Id.ToString(CultureInfo.InvariantCulture),
+            additions,
+            current.Revision));
+        TrackSavedIssue(saved);
+        StatusMessage = GetString("MessageIssueLinksSaved");
     }
 
     [RelayCommand(AllowConcurrentExecutions = true)]
@@ -244,11 +337,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
         {
             var result = await Task.Run(() =>
             {
+                var allIssues = service.List().Issues;
                 var listed = service.List(filter);
                 var matches = string.IsNullOrEmpty(query)
                     ? listed.Issues
                     : service.Search(query, filter);
-                return new RefreshResult(listed, matches);
+                return new RefreshResult(listed, matches, allIssues);
             }, cancellation.Token);
 
             if (cancellation.IsCancellationRequested || version != _refreshVersion)
@@ -262,6 +356,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 _knownRevisions[issue.Id] = issue.Revision;
             }
 
+            _availableIssues = result.AllIssues;
+            OnPropertyChanged(nameof(ParentIssuesText));
+            OnPropertyChanged(nameof(ChildIssuesText));
+            ClearIssueReferenceSuggestions();
             Issues.Synchronize(result.Matches);
 
             var selected = currentId is null
@@ -579,6 +677,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private void LoadIssue(Issue? issue)
     {
+        ClearIssueReferenceSuggestions();
         IsLoadingIssue = true;
         try
         {
@@ -616,6 +715,21 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private void ReplaceIssueInList(Issue issue)
     {
+        var availableIndex = _availableIssues.ToList().FindIndex(candidate => candidate.Id == issue.Id);
+        if (availableIndex < 0)
+        {
+            _availableIssues = _availableIssues.Append(issue).OrderBy(candidate => candidate.Id).ToArray();
+        }
+        else
+        {
+            var available = _availableIssues.ToArray();
+            available[availableIndex] = issue;
+            _availableIssues = available;
+        }
+
+        OnPropertyChanged(nameof(ParentIssuesText));
+        OnPropertyChanged(nameof(ChildIssuesText));
+
         var existing = Issues.FirstOrDefault(candidate => candidate.Id == issue.Id);
         if (existing is null)
         {
@@ -623,6 +737,18 @@ public sealed partial class MainWindowViewModel : ObservableObject
         }
 
         existing.Update(issue);
+    }
+
+    private string FormatIssueRelationships(IEnumerable<long>? ids)
+    {
+        var labels = ids?.Select(id =>
+        {
+            var relatedIssue = _availableIssues.FirstOrDefault(issue => issue.Id == id);
+            return relatedIssue is null
+                ? $"#{id.ToString(CultureInfo.InvariantCulture)}"
+                : $"#{relatedIssue.Id.ToString(CultureInfo.InvariantCulture)} {relatedIssue.Title}";
+        }).ToArray() ?? [];
+        return labels.Length == 0 ? GetString("NoIssueRelationships") : string.Join(", ", labels);
     }
 
     private string[] EditorTags() =>
@@ -639,5 +765,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private static IssuePriority ParsePriority(string? value) =>
         Enum.TryParse<IssuePriority>(value, true, out var parsed) ? parsed : IssuePriority.Normal;
 
-    private sealed record RefreshResult(IssueListResult Listed, IReadOnlyList<Issue> Matches);
+    private sealed record RefreshResult(
+        IssueListResult Listed,
+        IReadOnlyList<Issue> Matches,
+        IReadOnlyList<Issue> AllIssues);
 }
