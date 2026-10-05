@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\OpenIssue.Core\OpenIssue.Core.csproj" />
+    <ProjectReference Include="..\OpenIssue.Core\OpenIssue.Core.csproj" GlobalPropertiesToRemove="RuntimeIdentifier" />
   </ItemGroup>
 
   <ItemGroup>
@@ -14,6 +14,7 @@
     <AssemblyName>issue</AssemblyName>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>issue</ToolCommandName>
+    <PackAsToolShimRuntimeIdentifiers>win-x64</PackAsToolShimRuntimeIdentifiers>
     <PackageId>OpenIssue.Tool</PackageId>
     <Version>1.0.0</Version>
     <Authors>Open Issue contributors</Authors>
@@ -32,7 +33,9 @@
 
   <PropertyGroup>
     <DesktopProjectPath>$(MSBuildThisFileDirectory)..\OpenIssue.Desktop\OpenIssue.Desktop.csproj</DesktopProjectPath>
-    <DesktopOutputDirectory>$(MSBuildThisFileDirectory)..\..\artifacts\bin\OpenIssue.Desktop\$(Configuration)\net10.0-windows\</DesktopOutputDirectory>
+    <DesktopTargetFramework>net10.0-windows10.0.26100.0</DesktopTargetFramework>
+    <DesktopRuntimeIdentifier>win-x64</DesktopRuntimeIdentifier>
+    <DesktopOutputDirectory>$(MSBuildThisFileDirectory)..\..\artifacts\bin\OpenIssue.Desktop\$(Configuration)\$(DesktopTargetFramework)\$(DesktopRuntimeIdentifier)\</DesktopOutputDirectory>
   </PropertyGroup>
 
   <Target Name="BuildDesktopApplicationForToolPackage" BeforeTargets="_GetPackageFiles">
@@ -40,13 +43,25 @@
            Text="The OpenIssue.Tool package includes a Windows desktop application and must be packed on Windows." />
     <MSBuild Projects="$(DesktopProjectPath)"
              Targets="Restore;Build"
-             Properties="Configuration=$(Configuration);RestoreLockedMode=true" />
+             Properties="Configuration=$(Configuration);RestoreLockedMode=true"
+             RemoveProperties="RuntimeIdentifier" />
     <Error Condition="!Exists('$(DesktopOutputDirectory)OpenIssue.Desktop.exe')"
-           Text="The Windows desktop application was not built to '$(DesktopOutputDirectory)'." />
+           Text="The WinUI desktop application was not built to '$(DesktopOutputDirectory)'." />
     <ItemGroup>
-      <None Include="$(DesktopOutputDirectory)*"
+      <WinUiPayload Include="$(DesktopOutputDirectory)**\*"
+                    Exclude="$(DesktopOutputDirectory)AppX\**\*;$(DesktopOutputDirectory)Assets\**\*;$(DesktopOutputDirectory)publish\**\*;$(DesktopOutputDirectory)packages.lock.json;$(DesktopOutputDirectory)**\*.pdb">
+        <Pack>true</Pack>
+        <PackagePath>tools/net10.0/any/desktop/%(RecursiveDir)%(Filename)%(Extension)</PackagePath>
+      </WinUiPayload>
+      <None Include="@(WinUiPayload)" />
+      <WinUiAssets Include="..\OpenIssue.Desktop\Assets\**\*">
+        <Pack>true</Pack>
+        <PackagePath>tools/net10.0/any/desktop/Assets/%(RecursiveDir)%(Filename)%(Extension)</PackagePath>
+      </WinUiAssets>
+      <None Include="@(WinUiAssets)" />
+      <None Include="..\OpenIssue.Desktop\Package.appxmanifest"
             Pack="true"
-            PackagePath="tools/net10.0/any/desktop/" />
+            PackagePath="tools/net10.0/any/desktop/Package.appxmanifest" />
     </ItemGroup>
   </Target>
 

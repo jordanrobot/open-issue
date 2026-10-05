@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using OpenIssue.Core;
@@ -364,29 +365,92 @@ internal static class Cli
             throw new IssueException("The desktop UI is only available on Windows.");
         }
 
-        var executablePath = Path.Combine(AppContext.BaseDirectory, "desktop", "OpenIssue.Desktop.exe");
-        if (!File.Exists(executablePath))
+        var desktopDirectory = Path.Combine(AppContext.BaseDirectory, "desktop");
+        var executableName = "OpenIssue.Desktop.exe";
+        var executablePath = Path.Combine(desktopDirectory, executableName);
+        var packageManifestPath = Path.Combine(desktopDirectory, "Package.appxmanifest");
+        var generatedManifestPath = Path.Combine(desktopDirectory, "AppxManifest.xml");
+        if (!File.Exists(executablePath) || !File.Exists(packageManifestPath) || !File.Exists(generatedManifestPath))
         {
             throw new IssueException(
-                $"The Windows desktop application was not found at '{executablePath}'. Reinstall OpenIssue.Tool to restore it.");
+                $"The WinUI desktop application package was not found at '{desktopDirectory}'. Reinstall OpenIssue.Tool to restore it.");
         }
 
+        var appxDirectory = Path.Combine(Path.GetTempPath(), $"OpenIssue.AppX.{Guid.NewGuid():N}");
+        var runInfo = new ProcessStartInfo
+        {
+            FileName = "winapp",
+            WorkingDirectory = Environment.CurrentDirectory
+        };
+        runInfo.ArgumentList.Add("run");
+        runInfo.ArgumentList.Add(desktopDirectory);
+        runInfo.ArgumentList.Add("--manifest");
+        runInfo.ArgumentList.Add(generatedManifestPath);
+        runInfo.ArgumentList.Add("--exe");
+        runInfo.ArgumentList.Add(executableName);
+        runInfo.ArgumentList.Add("--output-appx-directory");
+        runInfo.ArgumentList.Add(appxDirectory);
+        var projectRootArgument = Convert.ToBase64String(Encoding.UTF8.GetBytes(Environment.CurrentDirectory));
+        runInfo.ArgumentList.Add("--");
+        runInfo.ArgumentList.Add($"--open-issue-root={projectRootArgument}");
+
+        var packageRegistered = false;
+        int? exitCode = null;
         try
         {
-            using var process = Process.Start(new ProcessStartInfo
-            {
-                FileName = executablePath,
-                WorkingDirectory = Environment.CurrentDirectory,
-                UseShellExecute = true
-            });
+            using var process = Process.Start(runInfo);
             if (process is null)
             {
-                throw new IssueException($"Could not start the Windows desktop application at '{executablePath}'.");
+                throw new IssueException("Could not start the WinUI desktop application.");
             }
+
+            packageRegistered = true;
+            process.WaitForExit();
+            exitCode = process.ExitCode;
         }
         catch (System.ComponentModel.Win32Exception exception)
         {
-            throw new IssueException($"Could not open the Windows desktop application: {exception.Message}");
+            throw new IssueException(
+                $"Could not launch the WinUI desktop application. Install the Windows App SDK CLI ('winapp') and retry. {exception.Message}");
+        }
+        finally
+        {
+            if (packageRegistered)
+            {
+                var unregisterInfo = new ProcessStartInfo
+                {
+                    FileName = "winapp",
+                    WorkingDirectory = Environment.CurrentDirectory
+                };
+                unregisterInfo.ArgumentList.Add("unregister");
+                unregisterInfo.ArgumentList.Add("--manifest");
+                unregisterInfo.ArgumentList.Add(packageManifestPath);
+                unregisterInfo.ArgumentList.Add("--output-appx-directory");
+                unregisterInfo.ArgumentList.Add(appxDirectory);
+
+                using var unregisterProcess = Process.Start(unregisterInfo);
+                if (unregisterProcess is null)
+                {
+                    throw new IssueException("Could not unregister the temporary WinUI package.");
+                }
+
+                unregisterProcess.WaitForExit();
+                if (unregisterProcess.ExitCode != 0)
+                {
+                    throw new IssueException(
+                        $"Could not unregister the temporary WinUI package (exit code {unregisterProcess.ExitCode}).");
+                }
+
+                if (Directory.Exists(appxDirectory))
+                {
+                    Directory.Delete(appxDirectory, recursive: true);
+                }
+            }
+        }
+
+        if (exitCode is not 0)
+        {
+            throw new IssueException($"The WinUI desktop application exited with code {exitCode}.");
         }
 
         return 0;

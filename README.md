@@ -10,7 +10,7 @@ Requires the .NET 10 runtime. Install the CLI as a .NET global tool:
 dotnet tool install --global OpenIssue.Tool
 ```
 
-The installed command is `issue`. Update it with `dotnet tool update --global OpenIssue.Tool`. On Windows, `issue ui` opens the bundled desktop application; the UI requires the .NET 10 Desktop Runtime.
+The installed command is `issue`. Update it with `dotnet tool update --global OpenIssue.Tool`. On Windows, `issue ui` launches the bundled WinUI 3 app with `winapp run`; the UI requires the Windows App SDK CLI (`winapp`), the .NET 10 Desktop Runtime, and Windows App Runtime.
 
 To install the package built from this checkout:
 
@@ -69,7 +69,7 @@ PowerShell helpers are also available from the repository root:
 
 `install.ps1` installs or replaces the global tool using the locally packed package; `uninstall.ps1` removes it.
 
-The CLI and core target portable .NET 10. The Windows desktop app uses WPF and is Windows-only. Build or publish it with `src/OpenIssue.Desktop/OpenIssue.Desktop.csproj`; the desktop UI shares the core and storage contract with the CLI.
+The CLI and core target portable .NET 10. The Windows desktop app uses WinUI 3 and the Windows App SDK. Build or package it with `src/OpenIssue.Desktop/OpenIssue.Desktop.csproj`; the desktop UI shares the core and storage contract with the CLI.
 
 ## Format and agent use
 

@@ -1,100 +1,204 @@
-using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
 using System.IO;
-using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Threading;
+using System.Runtime.InteropServices;
+using System.Text;
+using Microsoft.UI;
+using Microsoft.UI.Dispatching;
+using Microsoft.UI.Windowing;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.Windows.ApplicationModel.Resources;
 using OpenIssue.Core;
-using Microsoft.Win32;
+using Windows.Graphics;
+using Windows.Storage.Pickers;
+using WinRT.Interop;
+using VirtualKey = Windows.System.VirtualKey;
 
 namespace OpenIssue.Desktop;
 
-public partial class MainWindow : Window
+public sealed partial class MainWindow : Window
 {
-    private readonly ObservableCollection<Issue> _issues = [];
-    private readonly DispatcherTimer _refreshTimer = new() { Interval = TimeSpan.FromMilliseconds(500) };
-    private readonly DispatcherTimer _saveTimer = new() { Interval = TimeSpan.FromMilliseconds(100) };
-    private readonly Dictionary<long, string> _knownRevisions = [];
-    private IssueService? _service;
-    private Issue? _current;
+    private static readonly ResourceLoader Resources = new();
+    private readonly DispatcherQueueTimer _refreshTimer;
+    private readonly DispatcherQueueTimer _saveTimer;
     private FileSystemWatcher? _watcher;
-    private bool _loading;
-    private bool _refreshing;
+    private bool _initializationStarted;
+    private bool _closingPromptVisible;
+    private bool _allowClose;
+    private bool _refreshInProgress;
+    private bool _refreshQueued;
+    private readonly string? _launchArguments;
 
-    private enum SaveResult
-    {
-        Saved,
-        Reloaded,
-        Cancelled,
-        Failed
-    }
+    public MainWindowViewModel ViewModel { get; }
 
-    public MainWindow()
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint GetDpiForWindow(nint hwnd);
+
+    public MainWindow(string? launchArguments)
     {
+        _launchArguments = launchArguments;
+        ViewModel = new MainWindowViewModel();
         InitializeComponent();
-        IssueList.ItemsSource = _issues;
-        _refreshTimer.Tick += (_, _) =>
+        SetInitialWindowSize();
+        AppWindow.SetIcon("Assets/AppIcon.ico");
+
+        ViewModel.ResolveConflictAsync = ResolveConflictAsync;
+        ViewModel.PropertyChanged += ViewModel_PropertyChanged;
+        Title = ViewModel.WindowTitle;
+
+        _refreshTimer = App.DispatcherQueue.CreateTimer();
+        _refreshTimer.Interval = TimeSpan.FromMilliseconds(500);
+        _refreshTimer.IsRepeating = false;
+        _refreshTimer.Tick += async (_, _) =>
         {
             _refreshTimer.Stop();
-            RefreshList();
+            await RefreshFromUiAsync();
         };
-        _saveTimer.Tick += (_, _) =>
+
+        _saveTimer = App.DispatcherQueue.CreateTimer();
+        _saveTimer.Interval = TimeSpan.FromMilliseconds(100);
+        _saveTimer.IsRepeating = false;
+        _saveTimer.Tick += async (_, _) =>
         {
             _saveTimer.Stop();
-            SaveCurrent();
+            await ViewModel.SaveCommand.ExecuteAsync(null);
         };
-        Closing += Window_Closing;
+
+        AppWindow.Closing += Window_Closing;
+        Activated += Window_Activated;
         Closed += (_, _) =>
         {
             _refreshTimer.Stop();
             _saveTimer.Stop();
             _watcher?.Dispose();
+            ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
         };
-        InitializeProject();
     }
 
-    private void InitializeProject()
+    private void SetInitialWindowSize()
+    {
+        var windowHandle = Win32Interop.GetWindowFromWindowId(AppWindow.Id);
+        var dpi = GetDpiForWindow(windowHandle);
+        if (dpi == 0)
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+
+        var scale = dpi / 96.0;
+        AppWindow.Resize(new SizeInt32(
+            (int)Math.Ceiling(1120 * scale),
+            (int)Math.Ceiling(760 * scale)));
+    }
+
+    private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ViewModel.WindowTitle))
+        {
+            Title = ViewModel.WindowTitle;
+        }
+    }
+
+    private async void Window_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (_initializationStarted)
+        {
+            return;
+        }
+
+        _initializationStarted = true;
+        await InitializeProjectAsync();
+    }
+
+    private async Task InitializeProjectAsync()
     {
         try
         {
-            var root = ProjectLocator.Find();
-            SetProject(root);
-        }
-        catch (IssueException)
-        {
-            var dialog = new OpenFileDialog
-            {
-                Title = "Select an Open Issue project's .issues/config.json",
-                Filter = "Open Issue configuration (config.json)|config.json",
-                CheckFileExists = true
-            };
-            if (dialog.ShowDialog(this) != true)
-            {
-                Close();
-                return;
-            }
-
+            string root;
             try
             {
-                var root = Directory.GetParent(Path.GetDirectoryName(dialog.FileName)!)!.FullName;
-                ProjectLocator.ReadConfig(dialog.FileName);
-                SetProject(root);
+                var launchProjectRoot = GetProjectRootArgument(_launchArguments);
+                root = launchProjectRoot is null
+                    ? await Task.Run(() => ProjectLocator.Find())
+                    : await Task.Run(() => ProjectLocator.Find(launchProjectRoot));
             }
-            catch (Exception exception) when (exception is IssueException or IOException or UnauthorizedAccessException)
+            catch (IssueException)
             {
-                MessageBox.Show(this, exception.Message, "Cannot open project", MessageBoxButton.OK, MessageBoxImage.Error);
-                Close();
+                var configPath = await PickProjectConfigurationAsync();
+                if (configPath is null)
+                {
+                    _allowClose = true;
+                    Close();
+                    return;
+                }
+
+                root = await Task.Run(() => GetProjectRoot(configPath));
             }
+
+            var issuesPath = await ViewModel.InitializeProjectAsync(root);
+            SetWatcher(issuesPath);
+            await ViewModel.RefreshIssuesAsync();
+        }
+        catch (Exception exception) when (exception is IssueException or IOException or UnauthorizedAccessException or COMException)
+        {
+            await ShowMessageAsync(GetString("MessageCannotOpenProjectTitle"), exception.Message);
+            _allowClose = true;
+            Close();
         }
     }
 
-    private void SetProject(string root)
+    private static string? GetProjectRootArgument(string? arguments)
     {
-        _service = new IssueService(new IssueRepository(root));
-        Title = $"Open Issue — {root}";
-        var issuesPath = ProjectLocator.GetIssuesDirectory(root);
-        Directory.CreateDirectory(issuesPath);
+        const string prefix = "--open-issue-root=";
+        if (string.IsNullOrWhiteSpace(arguments))
+        {
+            return null;
+        }
+
+        var argument = arguments.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault(value => value.StartsWith(prefix, StringComparison.Ordinal));
+        if (argument is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return Encoding.UTF8.GetString(Convert.FromBase64String(argument[prefix.Length..]));
+        }
+        catch (FormatException exception)
+        {
+            throw new IssueException(Format("MessageInvalidLaunchArguments", exception.Message));
+        }
+    }
+
+    private async Task<string?> PickProjectConfigurationAsync()
+    {
+        var picker = new FileOpenPicker();
+        picker.FileTypeFilter.Add(".json");
+        InitializeWithWindow.Initialize(picker, App.WindowHandle);
+        var file = await picker.PickSingleFileAsync();
+        return file?.Path;
+    }
+
+    private static string GetProjectRoot(string configPath)
+    {
+        if (!string.Equals(Path.GetFileName(configPath), ProjectLocator.ConfigFileName, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new IssueException(Format(
+                "MessageWrongConfigFileFormat",
+                ProjectLocator.ConfigFileName));
+        }
+
+        ProjectLocator.ReadConfig(configPath);
+        var dataDirectory = Path.GetDirectoryName(configPath);
+        var projectRoot = dataDirectory is null ? null : Directory.GetParent(dataDirectory)?.FullName;
+        return projectRoot ?? throw new IssueException(GetString("MessageConfigNotInProject"));
+    }
+
+    private void SetWatcher(string issuesPath)
+    {
         _watcher = new FileSystemWatcher(issuesPath, "*.md")
         {
             NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
@@ -104,531 +208,333 @@ public partial class MainWindow : Window
         _watcher.Created += FilesChanged;
         _watcher.Deleted += FilesChanged;
         _watcher.Renamed += FilesChanged;
-        RefreshList();
     }
 
     private void FilesChanged(object sender, FileSystemEventArgs args)
     {
-        Dispatcher.BeginInvoke(() =>
-        {
-            if (IsKnownRevision(args.FullPath))
-            {
-                return;
-            }
-
-            MessageText.Text = "Issue files changed on disk. Refreshing…";
-            _refreshTimer.Stop();
-            _refreshTimer.Start();
-        });
+        var path = args.FullPath;
+        App.DispatcherQueue.TryEnqueue(() => _ = HandleFilesChangedAsync(path));
     }
 
-    private bool IsKnownRevision(string path)
+    private async Task HandleFilesChangedAsync(string path)
     {
-        if (_service is null ||
-            !long.TryParse(Path.GetFileNameWithoutExtension(path), NumberStyles.None,
-                CultureInfo.InvariantCulture, out var id) ||
-            !_knownRevisions.TryGetValue(id, out var revision))
+        if (await ViewModel.IsKnownRevisionAsync(path))
         {
-            return false;
+            return;
         }
 
-        try
-        {
-            return string.Equals(
-                _service.Resolve(id.ToString(CultureInfo.InvariantCulture)).Revision,
-                revision,
-                StringComparison.Ordinal);
-        }
-        catch (Exception exception) when (exception is IssueException or IOException or UnauthorizedAccessException)
-        {
-            return false;
-        }
+        ViewModel.StatusMessage = GetString("MessageIssueFilesChanged");
+        _refreshTimer.Stop();
+        _refreshTimer.Start();
     }
 
-    private bool RefreshList(bool preserveCurrentEditor = false)
+    private async Task RefreshFromUiAsync()
     {
-        if (_service is null || _refreshing || (!preserveCurrentEditor && !ConfirmLeaveCurrent()))
+        if (_refreshInProgress)
         {
-            return false;
+            _refreshQueued = true;
+            return;
         }
 
-        _refreshing = true;
+        _refreshInProgress = true;
         try
         {
-            var query = SearchBox.Text.Trim();
-            var status = SelectedFilter(StatusFilter);
-            var priority = SelectedFilter(PriorityFilter);
-            var filter = new IssueFilter(
-                status == "all status" ? null : ParseStatus(status),
-                Priority: priority == "all priority" ? null : ParsePriority(priority),
-                Draft: ReadyFilter.IsChecked == true ? false : null);
-            var listed = _service.List(filter);
-            foreach (var issue in listed.Issues)
+            do
             {
-                _knownRevisions[issue.Id] = issue.Revision;
-            }
+                _refreshQueued = false;
+                if (!await ConfirmLeaveCurrentAsync())
+                {
+                    return;
+                }
 
-            var result = string.IsNullOrEmpty(query)
-                ? listed
-                : new IssueListResult(_service.Search(query, filter), listed.Diagnostics);
-            _issues.Clear();
-            foreach (var issue in result.Issues)
-            {
-                _issues.Add(issue);
+                await ViewModel.RefreshCommand.ExecuteAsync(null);
             }
-
-            var selected = _current is null ? null : _issues.FirstOrDefault(issue => issue.Id == _current.Id);
-            IssueList.SelectedItem = selected ?? _issues.FirstOrDefault();
-            var selectedIssue = IssueList.SelectedItem as Issue;
-            if (preserveCurrentEditor &&
-                _current is not null &&
-                selectedIssue?.Id == _current.Id &&
-                string.Equals(selectedIssue.Revision, _current.Revision, StringComparison.Ordinal))
-            {
-                _current = selectedIssue;
-            }
-            else
-            {
-                LoadIssue(selectedIssue);
-            }
-
-            MessageText.Text = result.Diagnostics.Count == 0
-                ? $"Loaded {_issues.Count} issue(s)."
-                : string.Join(Environment.NewLine, result.Diagnostics.Select(diagnostic => $"{diagnostic.Path}: {diagnostic.Message}"));
-            return true;
-        }
-        catch (Exception exception) when (exception is IssueException or IOException or UnauthorizedAccessException)
-        {
-            MessageText.Text = exception.Message;
-            return false;
+            while (_refreshQueued);
         }
         finally
         {
-            _refreshing = false;
+            _refreshInProgress = false;
         }
     }
 
-    private bool ConfirmLeaveCurrent()
+    private async Task<bool> ConfirmLeaveCurrentAsync()
     {
         _saveTimer.Stop();
-        if (_current is null || !IsDirty())
+        if (!ViewModel.IsDirty)
         {
             return true;
         }
 
-        var saveResult = SaveCurrent(refreshIssueList: false);
-        if (saveResult is SaveResult.Saved or SaveResult.Reloaded)
+        var saveResult = await ViewModel.SaveCurrentAsync(refreshIssueList: false);
+        if (saveResult is IssueSaveResult.Saved or IssueSaveResult.Reloaded)
         {
             return true;
         }
 
-        if (saveResult == SaveResult.Cancelled)
+        if (saveResult == IssueSaveResult.Cancelled)
         {
             return false;
         }
 
-        var answer = MessageBox.Show(this,
-            $"{MessageText.Text}{Environment.NewLine}{Environment.NewLine}Discard unsaved changes and continue?",
-            "Autosave failed", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
-        if (answer != MessageBoxResult.Yes)
-        {
-            return false;
-        }
-
-        return ReloadCurrentIssue();
+        var answer = await ShowConfirmationAsync(
+            GetString("DialogAutosaveFailedTitle"),
+            Format("DialogDiscardChangesFormat", ViewModel.StatusMessage),
+            GetString("ButtonDiscardChanges"),
+            GetString("ButtonKeepEditing"));
+        return answer == ContentDialogResult.Primary && await ViewModel.ReloadCurrentIssueAsync();
     }
 
-    private bool IsDirty() =>
-        _current is not null &&
-        (TitleBox.Text != _current.Title ||
-         BodyBox.Text != _current.Body ||
-         !EditorTags().SequenceEqual(_current.Tags, StringComparer.Ordinal) ||
-         Selected(StatusBox) != _current.Status.ToString().ToLowerInvariant() ||
-         Selected(PriorityBox) != _current.Priority.ToString().ToLowerInvariant() ||
-         DraftBox.IsChecked != _current.Draft);
-
-    private SaveResult SaveCurrent(bool refreshIssueList = true)
+    private async Task<IssueConflictResolution> ResolveConflictAsync(Issue latest)
     {
-        _saveTimer.Stop();
-        var service = _service;
-        var current = _current;
-        if (service is null || current is null)
+        var answer = await ShowConfirmationAsync(
+            GetString("DialogResolveConflictTitle"),
+            Format("DialogResolveConflictFormat", latest.Id),
+            GetString("ButtonOverwrite"),
+            GetString("ButtonKeepEditing"),
+            GetString("ButtonLoadNewerVersion"));
+        return answer switch
         {
-            return SaveResult.Failed;
-        }
-
-        if (!IsDirty())
-        {
-            MessageText.Text = "All changes are saved.";
-            return SaveResult.Saved;
-        }
-
-        var issueId = current.Id.ToString(CultureInfo.InvariantCulture);
-        var expectedRevision = current.Revision;
-        var title = TitleBox.Text;
-        var body = BodyBox.Text;
-        var priority = ParsePriority(Selected(PriorityBox));
-        var tags = EditorTags();
-        var status = ParseStatus(Selected(StatusBox));
-        var draft = DraftBox.IsChecked != false;
-
-        while (true)
-        {
-            try
-            {
-                var saved = service.Edit(issueId, title, body, priority, tags,
-                    status: status, draft: draft, expectedRevision: expectedRevision);
-                TrackSavedIssue(saved);
-
-                if (refreshIssueList)
-                {
-                    if (RefreshList(preserveCurrentEditor: true))
-                    {
-                        MessageText.Text = $"Changes saved automatically. {MessageText.Text}";
-                    }
-                    else
-                    {
-                        MessageText.Text = $"Changes saved automatically, but the issue list could not be refreshed: {MessageText.Text}";
-                    }
-                }
-                else
-                {
-                    MessageText.Text = "Changes saved automatically.";
-                }
-
-                return SaveResult.Saved;
-            }
-            catch (IssueConflictException exception)
-            {
-                Issue latest;
-                try
-                {
-                    latest = service.Resolve(issueId);
-                }
-                catch (Exception readException) when (readException is IssueException or IOException or UnauthorizedAccessException)
-                {
-                    MessageText.Text = $"Autosave failed: {exception.Message} Latest version could not be loaded: {readException.Message}";
-                    return SaveResult.Failed;
-                }
-
-                if (string.Equals(latest.Revision, expectedRevision, StringComparison.Ordinal))
-                {
-                    MessageText.Text = $"Autosave failed: {exception.Message}";
-                    return SaveResult.Failed;
-                }
-
-                var answer = MessageBox.Show(this,
-                    $"Issue {latest.Id} was changed by another editor while you have unsaved changes.{Environment.NewLine}{Environment.NewLine}" +
-                    "Yes: overwrite the newer version with your edits. Newer title, body, status, priority, tags, or draft changes may be lost." +
-                    $"{Environment.NewLine}No: discard your edits and load the newer version." +
-                    $"{Environment.NewLine}Cancel: keep editing without saving.",
-                    "Resolve edit conflict", MessageBoxButton.YesNoCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel);
-
-                if (answer == MessageBoxResult.Yes)
-                {
-                    expectedRevision = latest.Revision;
-                    _current = latest;
-                    _knownRevisions[latest.Id] = latest.Revision;
-                    ReplaceIssueInList(latest);
-                    continue;
-                }
-
-                if (answer == MessageBoxResult.No)
-                {
-                    ReplaceIssueInList(latest);
-                    LoadIssue(latest);
-                    if (refreshIssueList)
-                    {
-                        RefreshList(preserveCurrentEditor: true);
-                    }
-
-                    MessageText.Text = "Loaded the newer version; your unsaved changes were discarded.";
-                    return SaveResult.Reloaded;
-                }
-
-                MessageText.Text = "The issue changed elsewhere. Your edits remain on screen and were not saved.";
-                return SaveResult.Cancelled;
-            }
-            catch (Exception exception) when (exception is IssueException or IOException or UnauthorizedAccessException)
-            {
-                MessageText.Text = $"Autosave failed: {exception.Message}";
-                return SaveResult.Failed;
-            }
-        }
+            ContentDialogResult.Primary => IssueConflictResolution.Overwrite,
+            ContentDialogResult.Secondary => IssueConflictResolution.LoadNewer,
+            _ => IssueConflictResolution.KeepEditing
+        };
     }
 
-    private bool ReloadCurrentIssue()
+    private async void IssueList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        var service = _service;
-        var current = _current;
-        if (service is null || current is null)
-        {
-            return false;
-        }
-
-        try
-        {
-            var latest = service.Resolve(current.Id.ToString(CultureInfo.InvariantCulture));
-            ReplaceIssueInList(latest);
-            LoadIssue(latest);
-            return true;
-        }
-        catch (Exception exception) when (exception is IssueException or IOException or UnauthorizedAccessException)
-        {
-            MessageText.Text = $"Cannot reload issue: {exception.Message}";
-            return false;
-        }
-    }
-
-    private void TrackSavedIssue(Issue issue)
-    {
-        _current = issue;
-        _knownRevisions[issue.Id] = issue.Revision;
-        ReplaceIssueInList(issue);
-        MetadataText.Text = FormatIssueMetadata(issue);
-
-        if (DraftBox.IsChecked == issue.Draft)
+        if (ViewModel.IsLoadingIssue ||
+            ViewModel.IsRefreshing ||
+            IssueList.SelectedItem is not Issue issue)
         {
             return;
         }
 
-        var wasLoading = _loading;
-        _loading = true;
-        try
+        var previous = ViewModel.SelectedIssue;
+        if (previous is not null &&
+            previous.Id != issue.Id &&
+            !await ConfirmLeaveCurrentAsync())
         {
-            DraftBox.IsChecked = issue.Draft;
-        }
-        finally
-        {
-            _loading = wasLoading;
-        }
-    }
-
-    private void ReplaceIssueInList(Issue issue)
-    {
-        var existing = _issues.FirstOrDefault(candidate => candidate.Id == issue.Id);
-        if (existing is null)
-        {
+            IssueList.SelectedItem = previous;
             return;
         }
 
-        var index = _issues.IndexOf(existing);
-        var wasSelected = IssueList.SelectedItem is Issue selected && selected.Id == issue.Id;
-        var wasLoading = _loading;
-        _loading = true;
-        try
+        if (!await ViewModel.SelectIssueAsync(issue))
         {
-            _issues[index] = issue;
-            if (wasSelected)
-            {
-                IssueList.SelectedItem = issue;
-            }
-        }
-        finally
-        {
-            _loading = wasLoading;
-        }
-    }
-
-    private void RestoreCurrentSelection()
-    {
-        var wasLoading = _loading;
-        _loading = true;
-        try
-        {
-            IssueList.SelectedItem = _current is null
-                ? null
-                : _issues.FirstOrDefault(issue => issue.Id == _current.Id);
-        }
-        finally
-        {
-            _loading = wasLoading;
-        }
-    }
-
-    private string[] EditorTags() =>
-        TagsBox.Text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
-    private void LoadIssue(Issue? issue)
-    {
-        _loading = true;
-        try
-        {
-            _current = issue;
-            if (issue is not null)
-            {
-                _knownRevisions[issue.Id] = issue.Revision;
-            }
-
-            MetadataText.Text = issue is null ? string.Empty : FormatIssueMetadata(issue);
-            TitleBox.Text = issue?.Title ?? "";
-            BodyBox.Text = issue?.Body ?? "";
-            TagsBox.Text = issue is null ? "" : string.Join(", ", issue.Tags);
-            SetSelected(StatusBox, issue?.Status.ToString().ToLowerInvariant());
-            SetSelected(PriorityBox, issue?.Priority.ToString().ToLowerInvariant());
-            DraftBox.IsChecked = issue?.Draft ?? true;
-            SetEditorEnabled(issue is not null);
-        }
-        finally
-        {
-            _loading = false;
-        }
-    }
-
-    private static string FormatIssueMetadata(Issue issue)
-    {
-        var createdBy = string.IsNullOrWhiteSpace(issue.CreatedBy) ? "Unknown" : issue.CreatedBy;
-        var createdAt = issue.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture);
-        var updatedAt = issue.UpdatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture);
-        return $"Created by {createdBy} | Created {createdAt} | Last edited {updatedAt}";
-    }
-
-    private void ClearEditor() => LoadIssue(null);
-
-    private void SetEditorEnabled(bool enabled)
-    {
-        TitleBox.IsEnabled = enabled;
-        BodyBox.IsEnabled = enabled;
-        TagsBox.IsEnabled = enabled;
-        StatusBox.IsEnabled = enabled;
-        PriorityBox.IsEnabled = enabled;
-        DraftBox.IsEnabled = enabled;
-    }
-
-    private void IssueList_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_loading || _refreshing || IssueList.SelectedItem is not Issue issue)
-        {
-            return;
-        }
-
-        var previous = _current;
-        if (previous is not null && previous.Id != issue.Id && !ConfirmLeaveCurrent())
-        {
-            RestoreCurrentSelection();
-            return;
-        }
-
-        if (_service is null)
-        {
-            LoadIssue(issue);
-            return;
-        }
-
-        try
-        {
-            var latest = _service.Resolve(issue.Id.ToString(CultureInfo.InvariantCulture));
-            ReplaceIssueInList(latest);
-            LoadIssue(latest);
-        }
-        catch (Exception exception) when (exception is IssueException or IOException or UnauthorizedAccessException)
-        {
-            MessageText.Text = $"Cannot load issue: {exception.Message}";
-            RestoreCurrentSelection();
+            IssueList.SelectedItem = previous;
         }
     }
 
     private void Filter_Changed(object sender, RoutedEventArgs e)
     {
-        if (!_loading)
-        {
-            RefreshList();
-        }
-    }
-
-    private void Refresh_Click(object sender, RoutedEventArgs e) => RefreshList();
-
-    private void Window_Activated(object? sender, EventArgs e) => RefreshList();
-
-    private void DeleteIssue_Click(object sender, RoutedEventArgs e)
-    {
-        if (_service is null || sender is not MenuItem { DataContext: Issue issue })
+        if (ViewModel.IsLoadingIssue)
         {
             return;
         }
 
-        var answer = MessageBox.Show(this,
-            $"Delete issue #{issue.Id}: {issue.Title}? This cannot be undone.",
-            "Delete issue", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
-        if (answer != MessageBoxResult.Yes || !ConfirmLeaveCurrent())
+        _refreshTimer.Stop();
+        _refreshTimer.Start();
+    }
+
+    private async void Refresh_Click(object sender, RoutedEventArgs e) =>
+        await RefreshFromUiAsync();
+
+    private async void Window_Activated(object sender, WindowActivatedEventArgs e)
+    {
+        if (e.WindowActivationState is not WindowActivationState.Deactivated)
+        {
+            await RefreshFromUiAsync();
+        }
+    }
+
+    private async void DeleteIssue_Click(object sender, RoutedEventArgs e)
+    {
+        var issue = ViewModel.SelectedIssue;
+        if (issue is null)
+        {
+            return;
+        }
+
+        var answer = await ShowConfirmationAsync(
+            GetString("DialogDeleteIssueTitle"),
+            Format("DialogDeleteIssueFormat", issue.Id, issue.Title),
+            GetString("ButtonDelete"),
+            GetString("ButtonCancel"));
+        if (answer != ContentDialogResult.Primary || !await ConfirmLeaveCurrentAsync())
         {
             return;
         }
 
         try
         {
-            _service.Delete(issue.Id.ToString(CultureInfo.InvariantCulture));
-            _knownRevisions.Remove(issue.Id);
-            RefreshList();
+            await ViewModel.DeleteIssueCommand.ExecuteAsync(issue.Id);
         }
         catch (Exception exception) when (exception is IssueException or IOException or UnauthorizedAccessException)
         {
-            MessageBox.Show(this, exception.Message, "Cannot delete issue", MessageBoxButton.OK, MessageBoxImage.Error);
+            await ShowMessageAsync(GetString("MessageCannotDeleteIssueTitle"), exception.Message);
         }
     }
 
-    private void Window_Closing(object? sender, CancelEventArgs e)
+    private async void Window_Closing(AppWindow sender, AppWindowClosingEventArgs e)
     {
-        if (!ConfirmLeaveCurrent())
+        if (_allowClose || !ViewModel.IsDirty)
         {
-            e.Cancel = true;
+            return;
+        }
+
+        e.Cancel = true;
+        if (_closingPromptVisible)
+        {
+            return;
+        }
+
+        _closingPromptVisible = true;
+        try
+        {
+            if (await ConfirmLeaveCurrentAsync())
+            {
+                _allowClose = true;
+                Close();
+            }
+        }
+        finally
+        {
+            _closingPromptVisible = false;
         }
     }
 
     private void Editor_Changed(object sender, RoutedEventArgs e)
     {
-        if (_loading || _current is null)
+        if (ViewModel.IsLoadingIssue || ViewModel.SelectedIssue is null)
         {
             return;
         }
 
-        MessageText.Text = "Saving changes...";
+        ViewModel.StatusMessage = GetString("MessageSavingChanges");
         _saveTimer.Stop();
         _saveTimer.Start();
     }
 
-    private void NewIssue_Click(object sender, RoutedEventArgs e)
+    private void BodyBox_KeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
     {
-        if (_service is null || !ConfirmLeaveCurrent())
+        if (e.Key != VirtualKey.Tab || sender is not TextBox textBox)
         {
             return;
         }
 
-        var title = new NewIssueWindow { Owner = this };
-        if (title.ShowDialog() != true)
+        var selectionStart = textBox.SelectionStart;
+        textBox.SelectedText = "\t";
+        textBox.SelectionStart = selectionStart + 1;
+        e.Handled = true;
+    }
+
+    private async void NewIssue_Click(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(ViewModel.ProjectRoot) || !await ConfirmLeaveCurrentAsync())
+        {
+            return;
+        }
+
+        var titleBox = new TextBox
+        {
+            Header = GetString("NewIssueTitleLabel"),
+            PlaceholderText = GetString("TitleBox.PlaceholderText")
+        };
+        AutomationProperties.SetAutomationId(titleBox, "NewIssueTitle");
+        AutomationProperties.SetName(titleBox, GetString("NewIssueTitleLabel"));
+
+        var validationMessage = new TextBlock();
+        var content = new StackPanel { Spacing = 8 };
+        content.Children.Add(titleBox);
+        content.Children.Add(validationMessage);
+        titleBox.TextChanged += (_, _) =>
+        {
+            if (!string.IsNullOrWhiteSpace(titleBox.Text))
+            {
+                validationMessage.Text = string.Empty;
+            }
+        };
+
+        var dialog = new ContentDialog
+        {
+            Title = GetString("DialogNewIssueTitle"),
+            Content = content,
+            PrimaryButtonText = GetString("ButtonCreate"),
+            CloseButtonText = GetString("ButtonCancel"),
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = RootGrid.XamlRoot
+        };
+        AutomationProperties.SetAutomationId(dialog, "NewIssueDialog");
+        AutomationProperties.SetName(dialog, GetString("DialogNewIssueTitle"));
+        dialog.PrimaryButtonClick += (_, args) =>
+        {
+            if (string.IsNullOrWhiteSpace(titleBox.Text))
+            {
+                args.Cancel = true;
+                validationMessage.Text = GetString("MessageIssueTitleCannotBeEmpty");
+                titleBox.Focus(FocusState.Programmatic);
+            }
+        };
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
         {
             return;
         }
 
         try
         {
-            var issue = _service.Create(title.IssueTitle, string.Empty);
-            RefreshList();
-            IssueList.SelectedItem = _issues.FirstOrDefault(item => item.Id == issue.Id);
-            TitleBox.Focus();
+            await ViewModel.CreateIssueCommand.ExecuteAsync(titleBox.Text);
+            TitleBox.Focus(FocusState.Programmatic);
             TitleBox.SelectAll();
         }
-        catch (IssueException exception)
+        catch (Exception exception) when (exception is IssueException or IOException or UnauthorizedAccessException)
         {
-            MessageBox.Show(this, exception.Message, "Cannot create issue", MessageBoxButton.OK, MessageBoxImage.Error);
+            await ShowMessageAsync(GetString("MessageCannotCreateIssueTitle"), exception.Message);
         }
     }
 
-    private static string SelectedFilter(ComboBox combo) =>
-        (combo.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "";
-
-    private static string Selected(ComboBox combo) =>
-        (combo.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "";
-
-    private static void SetSelected(ComboBox combo, string? value)
+    private async Task ShowMessageAsync(string title, string message)
     {
-        combo.SelectedItem = combo.Items.Cast<ComboBoxItem>()
-            .FirstOrDefault(item => string.Equals(item.Content?.ToString(), value, StringComparison.OrdinalIgnoreCase));
+        var dialog = new ContentDialog
+        {
+            Title = title,
+            Content = message,
+            CloseButtonText = GetString("ButtonOk"),
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = RootGrid.XamlRoot
+        };
+        AutomationProperties.SetAutomationId(dialog, "MessageDialog");
+        AutomationProperties.SetName(dialog, title);
+        await dialog.ShowAsync();
     }
 
-    private static IssueStatus ParseStatus(string value) =>
-        Enum.TryParse<IssueStatus>(value, true, out var parsed) ? parsed : IssueStatus.Open;
+    private async Task<ContentDialogResult> ShowConfirmationAsync(
+        string title,
+        string message,
+        string primaryButtonText,
+        string closeButtonText,
+        string? secondaryButtonText = null)
+    {
+        var dialog = new ContentDialog
+        {
+            Title = title,
+            Content = message,
+            PrimaryButtonText = primaryButtonText,
+            CloseButtonText = closeButtonText,
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = RootGrid.XamlRoot
+        };
+        AutomationProperties.SetAutomationId(dialog, "ConfirmationDialog");
+        AutomationProperties.SetName(dialog, title);
+        if (secondaryButtonText is not null)
+        {
+            dialog.SecondaryButtonText = secondaryButtonText;
+        }
 
-    private static IssuePriority ParsePriority(string value) =>
-        Enum.TryParse<IssuePriority>(value, true, out var parsed) ? parsed : IssuePriority.Normal;
+        return await dialog.ShowAsync();
+    }
+
+    private static string GetString(string key) => Resources.GetString(key);
+
+    private static string Format(string key, params object?[] values) =>
+        string.Format(CultureInfo.CurrentCulture, GetString(key), values);
 }
