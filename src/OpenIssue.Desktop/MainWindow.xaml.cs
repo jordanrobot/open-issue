@@ -9,9 +9,11 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.Windows.ApplicationModel.Resources;
 using OpenIssue.Core;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.Graphics;
 using Windows.Storage.Pickers;
 using WinRT.Interop;
@@ -33,6 +35,10 @@ public sealed partial class MainWindow : Window
     private bool _suppressIssueReferenceSuggestions;
     private int _issueReferenceStart = -1;
     private int _issueReferenceLength;
+    private long? _draggedIssueId;
+    private long? _pointerPressedIssueId;
+    private long? _dropTargetIssueId;
+    private IssueDropHint _dropHint;
     private readonly string? _launchArguments;
 
     public MainWindowViewModel ViewModel { get; }
@@ -49,6 +55,36 @@ public sealed partial class MainWindow : Window
     /// <returns>Visible when suggestions are available.</returns>
     public static Visibility SuggestionVisibility(bool hasSuggestions) =>
         hasSuggestions ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>Shows the temporary root-level drop target during an issue drag.</summary>
+    public static Visibility DraggingVisibility(bool isDragging) =>
+        isDragging ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>Shows the nested-row guide for issues that have a parent.</summary>
+    public static Visibility NestedIssueVisibility(bool isNested) =>
+        isNested ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>Reduces the horizontal inset for each visible tree level.</summary>
+    /// <param name="depth">The row's depth in the displayed tree.</param>
+    /// <returns>A margin that compresses the indentation while preserving the hierarchy.</returns>
+    public static Thickness CompactNestedRowMargin(int depth) =>
+        new(-4 * depth, 0, 0, 0);
+
+    /// <summary>Shows the insertion line before a drag target.</summary>
+    public static Visibility DropBeforeVisibility(IssueDropHint hint) =>
+        hint == IssueDropHint.Before ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>Shows the insertion line after a drag target.</summary>
+    public static Visibility DropAfterVisibility(IssueDropHint hint) =>
+        hint == IssueDropHint.After ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>Shows the row highlight when a dragged issue will become a child.</summary>
+    public static Visibility DropNestVisibility(IssueDropHint hint) =>
+        hint == IssueDropHint.Nest ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>Outlines a child destination and highlights the active root drop target.</summary>
+    public static Thickness DropTargetBorderThickness(IssueDropHint hint) =>
+        hint == IssueDropHint.Nest ? new Thickness(1) : new Thickness(0);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint GetDpiForWindow(nint hwnd);
@@ -318,11 +354,15 @@ public sealed partial class MainWindow : Window
         };
     }
 
-    private async void IssueList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private async void IssueList_SelectionChanged(TreeView sender, TreeViewSelectionChangedEventArgs e)
     {
+        var row = e.AddedItems
+            .Select(ResolveIssueListItem)
+            .FirstOrDefault(item => item is not null)
+            ?? ResolveIssueListItem(sender.SelectedItem);
         if (ViewModel.IsLoadingIssue ||
             ViewModel.IsRefreshing ||
-            IssueList.SelectedItem is not IssueListItem row)
+            row is null)
         {
             return;
         }
@@ -347,6 +387,266 @@ public sealed partial class MainWindow : Window
         {
             IssueList.SelectedItem = previousRow;
         }
+    }
+
+    private void IssueListItem_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        _pointerPressedIssueId = sender is TreeViewItem container
+            ? ResolveIssueListItem(container)?.Id
+            : null;
+    }
+
+    private void IssueListItem_PointerReleased(object sender, PointerRoutedEventArgs e) =>
+        _pointerPressedIssueId = null;
+
+    private void IssueList_DragItemsStarting(TreeView sender, TreeViewDragItemsStartingEventArgs e)
+    {
+        var issue = _pointerPressedIssueId is { } pressedIssueId
+            ? ViewModel.Issues.FirstOrDefault(candidate => candidate.Id == pressedIssueId)
+            : null;
+        issue ??= e.Items
+            .Select(ResolveIssueListItem)
+            .FirstOrDefault(item => item is not null)
+            ?? ResolveIssueListItem(sender.SelectedItem);
+        _pointerPressedIssueId = null;
+        if (e.Items.Count > 1 || issue is null)
+        {
+            _draggedIssueId = null;
+            e.Cancel = true;
+            return;
+        }
+
+        _draggedIssueId = issue.Id;
+        _dropTargetIssueId = null;
+        _dropHint = IssueDropHint.None;
+        ViewModel.BeginIssueDrag(issue);
+        e.Data.RequestedOperation = DataPackageOperation.Move;
+        e.Data.SetText(MainWindowViewModel.FormatIssueLabel(issue.Id, issue.Title));
+    }
+
+    private void IssueList_DragOver(object sender, DragEventArgs e)
+    {
+        if (!e.DataView.Contains(StandardDataFormats.Text))
+        {
+            return;
+        }
+
+        e.AcceptedOperation = DataPackageOperation.Move;
+        var (target, container) = FindIssueDropTarget(e.OriginalSource);
+        if (target is null || container is null)
+        {
+            if (_dropTargetIssueId is not null)
+            {
+                return;
+            }
+
+            _dropTargetIssueId = null;
+            _dropHint = IssueDropHint.None;
+            ViewModel.ClearIssueDropHint();
+            if (_draggedIssueId is { } issueId &&
+                ViewModel.Issues.FirstOrDefault(issue => issue.Id == issueId)?.IsNested == true)
+            {
+                ViewModel.SetRootDropPreview();
+            }
+
+            return;
+        }
+
+        if (target.Id == _draggedIssueId)
+        {
+            _dropTargetIssueId = null;
+            _dropHint = IssueDropHint.None;
+            ViewModel.ClearIssueDropHint();
+            return;
+        }
+
+        UpdateIssueDropPreview(e, target, container);
+    }
+
+    private void IssueListItem_DragOver(object sender, DragEventArgs e)
+    {
+        if (!e.DataView.Contains(StandardDataFormats.Text) ||
+            sender is not TreeViewItem container ||
+            ResolveIssueListItem(container) is not { } target)
+        {
+            return;
+        }
+
+        e.AcceptedOperation = DataPackageOperation.Move;
+        UpdateIssueDropPreview(e, target, container);
+    }
+
+    private void UpdateIssueDropPreview(DragEventArgs e, IssueListItem target, TreeViewItem container)
+    {
+        if (target.Id == _draggedIssueId)
+        {
+            _dropTargetIssueId = null;
+            _dropHint = IssueDropHint.None;
+            ViewModel.ClearIssueDropHint();
+            return;
+        }
+
+        if (container.ActualHeight <= 0)
+        {
+            _dropTargetIssueId = target.Id;
+            _dropHint = IssueDropHint.Nest;
+            ViewModel.UpdateIssueDropHint(target.Id, IssueDropHint.Nest);
+            return;
+        }
+
+        var y = e.GetPosition(container).Y / container.ActualHeight;
+        var hint = y < 0.22
+            ? IssueDropHint.Before
+            : y > 0.78
+                ? IssueDropHint.After
+                : IssueDropHint.Nest;
+        _dropTargetIssueId = target.Id;
+        _dropHint = hint;
+        ViewModel.UpdateIssueDropHint(target.Id, hint);
+    }
+
+    private void IssueListItem_DragLeave(object sender, DragEventArgs e)
+    {
+        if (sender is TreeViewItem container &&
+            ResolveIssueListItem(container)?.Id == _dropTargetIssueId)
+        {
+            _dropTargetIssueId = null;
+            _dropHint = IssueDropHint.None;
+        }
+
+        ViewModel.ClearIssueDropHint();
+    }
+
+    private async void IssueList_DragItemsCompleted(
+        TreeView sender,
+        TreeViewDragItemsCompletedEventArgs e)
+    {
+        var draggedIssueId = _draggedIssueId;
+        var dropTargetIssueId = _dropTargetIssueId;
+        var dropHint = _dropHint;
+        _draggedIssueId = null;
+        _dropTargetIssueId = null;
+        _dropHint = IssueDropHint.None;
+        if (draggedIssueId is null || e.DropResult != DataPackageOperation.Move)
+        {
+            ViewModel.EndIssueDrag();
+            return;
+        }
+
+        var targetParent = dropHint == IssueDropHint.Nest && dropTargetIssueId is { } targetIssueId
+            ? ViewModel.Issues.FirstOrDefault(issue => issue.Id == targetIssueId)
+            : ResolveIssueListItem(e.NewParentItem);
+        var visibleOrder = GetVisibleTreeOrder(ViewModel.Issues.RootItems);
+        var draggedRow = ViewModel.Issues.FirstOrDefault(issue => issue.Id == draggedIssueId.Value);
+        var alreadyUnderTarget = targetParent is not null &&
+            (draggedRow?.Issue.Parents.Contains(targetParent.Id) == true ||
+             targetParent.Issue.Children.Contains(draggedIssueId.Value));
+        var moveToParent = targetParent is not null &&
+                           targetParent.Id != draggedIssueId.Value &&
+                           !alreadyUnderTarget;
+        var moveToRoot = targetParent is null &&
+                         draggedRow?.IsNested == true;
+
+        try
+        {
+            if (moveToParent || moveToRoot)
+            {
+                if (!await ConfirmLeaveCurrentAsync())
+                {
+                    ViewModel.Issues.RebuildHierarchy();
+                    return;
+                }
+            }
+
+            await ViewModel.PersistVisibleIssueOrderAsync(visibleOrder);
+            if (moveToRoot)
+            {
+                await ViewModel.MoveIssueToRootAsync(draggedIssueId.Value);
+            }
+            else if (moveToParent)
+            {
+                await ViewModel.MoveIssueUnderParentAsync(draggedIssueId.Value, targetParent!.Id);
+            }
+        }
+        catch (Exception exception) when (exception is IssueException or IOException or UnauthorizedAccessException)
+        {
+            var title = moveToParent || moveToRoot
+                ? GetString("MessageCannotMoveIssueTitle")
+                : GetString("MessageCannotReorderIssuesTitle");
+            await ShowMessageAsync(title, exception.Message);
+            await ViewModel.RefreshIssuesAsync(preserveCurrentEditor: true);
+        }
+        finally
+        {
+            ViewModel.EndIssueDrag();
+        }
+    }
+
+    private static IssueListItem? ResolveIssueListItem(object? item)
+    {
+        var current = item;
+        for (var depth = 0; depth < 4 && current is not null; depth++)
+        {
+            var next = current switch
+            {
+                IssueListItem issue => issue,
+                TreeViewNode node => node.Content,
+                FrameworkElement { DataContext: { } dataContext } => dataContext,
+                _ => null
+            };
+            if (next is IssueListItem resolved)
+            {
+                return resolved;
+            }
+
+            if (next is null || ReferenceEquals(next, current))
+            {
+                return null;
+            }
+
+            current = next;
+        }
+
+        return null;
+    }
+
+    private static (IssueListItem? Issue, TreeViewItem? Container) FindIssueDropTarget(object? originalSource)
+    {
+        var element = originalSource as DependencyObject;
+        while (element is not null)
+        {
+            if (element is TreeViewItem container &&
+                ResolveIssueListItem(container) is { } issue)
+            {
+                return (issue, container);
+            }
+
+            element = VisualTreeHelper.GetParent(element);
+        }
+
+        return (null, null);
+    }
+
+    private static IReadOnlyList<long> GetVisibleTreeOrder(IEnumerable<IssueListItem> roots)
+    {
+        var issueIds = new List<long>();
+        var visited = new HashSet<long>();
+        var pending = new Stack<IssueListItem>(roots.Reverse());
+        while (pending.TryPop(out var issue))
+        {
+            if (!visited.Add(issue.Id))
+            {
+                continue;
+            }
+
+            issueIds.Add(issue.Id);
+            for (var index = issue.Children.Count - 1; index >= 0; index--)
+            {
+                pending.Push(issue.Children[index]);
+            }
+        }
+
+        return issueIds;
     }
 
     private void SearchBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs e)
@@ -398,6 +698,25 @@ public sealed partial class MainWindow : Window
         if (sender is FrameworkElement { DataContext: IssueListItem row })
         {
             await DeleteIssueAsync(row.Issue);
+        }
+    }
+
+    private async void MoveIssueToRootContextMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: IssueListItem row } ||
+            !await ConfirmLeaveCurrentAsync())
+        {
+            return;
+        }
+
+        try
+        {
+            await ViewModel.MoveIssueToRootAsync(row.Id);
+        }
+        catch (Exception exception) when (exception is IssueException or IOException or UnauthorizedAccessException)
+        {
+            await ShowMessageAsync(GetString("MessageCannotMoveIssueTitle"), exception.Message);
+            await ViewModel.RefreshIssuesAsync(preserveCurrentEditor: true);
         }
     }
 

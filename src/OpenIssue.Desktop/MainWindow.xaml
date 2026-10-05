@@ -6,6 +6,11 @@
     xmlns:controls="using:CommunityToolkit.WinUI.Controls"
     xmlns:local="using:OpenIssue.Desktop">
     <Grid x:Name="RootGrid" Margin="16" Background="Transparent" Loaded="Window_Loaded">
+        <Grid.Resources>
+            <Thickness x:Key="TreeViewItemPresenterMargin">4,0</Thickness>
+            <Thickness x:Key="TreeViewItemPresenterPadding">0</Thickness>
+            <x:Double x:Key="TreeViewItemMinHeight">28</x:Double>
+        </Grid.Resources>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="360" MinWidth="320" />
             <ColumnDefinition Width="Auto" />
@@ -99,38 +104,102 @@
                     Unchecked="Filter_Changed"
                     AutomationProperties.AutomationId="ReadyFilter" />
                 <Grid Grid.Row="4">
-                    <ListView
+                    <TreeView
                         x:Name="IssueList"
-                        ItemsSource="{x:Bind ViewModel.Issues, Mode=OneWay}"
+                        ItemsSource="{x:Bind ViewModel.Issues.RootItems, Mode=OneWay}"
                         SelectedItem="{x:Bind ViewModel.SelectedIssueListItem, Mode=OneWay}"
                         SelectionChanged="IssueList_SelectionChanged"
+                        CanDragItems="True"
+                        CanReorderItems="True"
+                        AllowDrop="True"
+                        DragItemsStarting="IssueList_DragItemsStarting"
+                        DragItemsCompleted="IssueList_DragItemsCompleted"
+                        DragOver="IssueList_DragOver"
                         Background="Transparent"
+                        ToolTipService.ToolTip="{x:Bind ViewModel.IssueListDragDropDescription, Mode=OneTime}"
+                        AutomationProperties.HelpText="{x:Bind ViewModel.IssueListDragDropDescription, Mode=OneTime}"
                         AutomationProperties.AutomationId="IssueList"
                         AutomationProperties.Name="{x:Bind ViewModel.IssueListAutomationName, Mode=OneTime}">
-                        <ListView.ItemTemplate>
+                        <TreeView.ItemTemplate>
                             <DataTemplate x:DataType="local:IssueListItem">
-                                <Grid Background="Transparent">
-                                    <Grid.ContextFlyout>
-                                        <MenuFlyout>
-                                            <MenuFlyoutItem
-                                                x:Uid="IssueListDeleteContextMenuItem"
-                                                Click="DeleteIssueContextMenuItem_Click"
-                                                AutomationProperties.AutomationId="IssueListDeleteContextMenuItem" />
-                                        </MenuFlyout>
-                                    </Grid.ContextFlyout>
-                                    <Border
-                                        Margin="4,2"
-                                        Padding="12,10"
-                                        CornerRadius="6">
-                                        <TextBlock
-                                            Text="{x:Bind local:MainWindowViewModel.FormatIssueLabel(Id, Title), Mode=OneWay}"
-                                            Style="{StaticResource BodyStrongTextBlockStyle}"
-                                            TextTrimming="CharacterEllipsis" />
-                                    </Border>
-                                </Grid>
+                                <TreeViewItem
+                                    ItemsSource="{x:Bind Children, Mode=OneWay}"
+                                    IsExpanded="{x:Bind IsExpanded, Mode=TwoWay}"
+                                    Margin="{x:Bind local:MainWindow.CompactNestedRowMargin(Depth), Mode=OneWay}"
+                                    AllowDrop="True"
+                                    PointerPressed="IssueListItem_PointerPressed"
+                                    PointerReleased="IssueListItem_PointerReleased"
+                                    DragOver="IssueListItem_DragOver"
+                                    DragLeave="IssueListItem_DragLeave"
+                                    AutomationProperties.AutomationId="{x:Bind AutomationId, Mode=OneTime}"
+                                    AutomationProperties.Name="{x:Bind local:MainWindowViewModel.FormatIssueLabel(Id, Title), Mode=OneWay}">
+                                    <Grid Background="Transparent">
+                                        <Grid.ContextFlyout>
+                                            <MenuFlyout>
+                                                <MenuFlyoutItem
+                                                    x:Uid="IssueListMoveToRootContextMenuItem"
+                                                    Click="MoveIssueToRootContextMenuItem_Click"
+                                                    IsEnabled="{x:Bind IsNested, Mode=OneWay}"
+                                                    AutomationProperties.AutomationId="{x:Bind MoveToRootAutomationId, Mode=OneTime}" />
+                                                <MenuFlyoutSeparator />
+                                                <MenuFlyoutItem
+                                                    x:Uid="IssueListDeleteContextMenuItem"
+                                                    Click="DeleteIssueContextMenuItem_Click"
+                                                    AutomationProperties.AutomationId="IssueListDeleteContextMenuItem" />
+                                            </MenuFlyout>
+                                        </Grid.ContextFlyout>
+                                        <Border
+                                            Margin="2,0"
+                                            Padding="6,1"
+                                            CornerRadius="4"
+                                            Background="Transparent"
+                                            BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                                            BorderThickness="{x:Bind local:MainWindow.DropTargetBorderThickness(DropHint), Mode=OneWay}">
+                                            <Grid ColumnSpacing="4">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <Border
+                                                    Width="1"
+                                                    VerticalAlignment="Stretch"
+                                                    Background="{ThemeResource AccentFillColorSecondaryBrush}"
+                                                    Visibility="{x:Bind local:MainWindow.NestedIssueVisibility(IsNested), Mode=OneWay}" />
+                                                <TextBlock
+                                                    Grid.Column="1"
+                                                    Text="{x:Bind local:MainWindowViewModel.FormatIssueLabel(Id, Title), Mode=OneWay}"
+                                                    Style="{StaticResource BodyTextBlockStyle}"
+                                                    TextWrapping="NoWrap"
+                                                    TextTrimming="CharacterEllipsis" />
+                                            </Grid>
+                                        </Border>
+                                        <Border
+                                            Height="2"
+                                            Margin="2,0"
+                                            VerticalAlignment="Top"
+                                            Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                            IsHitTestVisible="False"
+                                            Visibility="{x:Bind local:MainWindow.DropBeforeVisibility(DropHint), Mode=OneWay}" />
+                                        <Border
+                                            Height="2"
+                                            Margin="2,0"
+                                            VerticalAlignment="Bottom"
+                                            Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                            IsHitTestVisible="False"
+                                            Visibility="{x:Bind local:MainWindow.DropAfterVisibility(DropHint), Mode=OneWay}" />
+                                        <Border
+                                            Margin="2,0"
+                                            CornerRadius="4"
+                                            Background="{ThemeResource AccentFillColorTertiaryBrush}"
+                                            BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                                            BorderThickness="1"
+                                            IsHitTestVisible="False"
+                                            Visibility="{x:Bind local:MainWindow.DropNestVisibility(DropHint), Mode=OneWay}" />
+                                    </Grid>
+                                </TreeViewItem>
                             </DataTemplate>
-                        </ListView.ItemTemplate>
-                    </ListView>
+                        </TreeView.ItemTemplate>
+                    </TreeView>
                     <Border
                         Padding="24"
                         HorizontalAlignment="Center"
@@ -372,7 +441,7 @@
                         AutomationProperties.Name="{x:Bind ViewModel.LoadingAutomationName, Mode=OneTime}" />
                     <TextBlock
                         x:Name="MessageText"
-                        Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
+                        Text="{x:Bind ViewModel.DisplayStatusMessage, Mode=OneWay}"
                         TextWrapping="Wrap"
                         Style="{StaticResource BodyTextBlockStyle}" />
                 </StackPanel>

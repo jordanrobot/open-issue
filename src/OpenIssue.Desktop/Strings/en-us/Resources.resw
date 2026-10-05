@@ -90,6 +90,24 @@
   <data name="IssueListName" xml:space="preserve">
     <value>Issues</value>
   </data>
+  <data name="IssueListDragDropDescription" xml:space="preserve">
+    <value>Drag between rows to reorder, onto a different issue to reparent, or into open space to move to the top level. The row menu also offers Move to top level.</value>
+  </data>
+  <data name="IssueListDragStartFormat" xml:space="preserve">
+    <value>Moving {0}. Drop on an issue to reparent, between rows to reorder, or into open space to remove its parent links.</value>
+  </data>
+  <data name="IssueListDropBeforeFormat" xml:space="preserve">
+    <value>Move {0} before {1}.</value>
+  </data>
+  <data name="IssueListDropAfterFormat" xml:space="preserve">
+    <value>Move {0} after {1}.</value>
+  </data>
+  <data name="IssueListDropAsChildFormat" xml:space="preserve">
+    <value>Move {0} under {1}.</value>
+  </data>
+  <data name="IssueListDropToRootFormat" xml:space="preserve">
+    <value>Move {0} to the top level and remove its parent links.</value>
+  </data>
   <data name="LoadingIssuesAutomationName" xml:space="preserve">
     <value>Loading issues</value>
   </data>
@@ -266,6 +284,24 @@
   </data>
   <data name="MessageIssueLinksSaved" xml:space="preserve">
     <value>Issue links saved.</value>
+  </data>
+  <data name="IssueListMoveToRootContextMenuItem.Text" xml:space="preserve">
+    <value>Move to top level</value>
+  </data>
+  <data name="MessageIssueListOrderSaved" xml:space="preserve">
+    <value>Issue order saved.</value>
+  </data>
+  <data name="MessageCannotReorderIssuesTitle" xml:space="preserve">
+    <value>Cannot reorder issues</value>
+  </data>
+  <data name="MessageCannotMoveIssueTitle" xml:space="preserve">
+    <value>Cannot move issue</value>
+  </data>
+  <data name="MessageIssueMovedUnderFormat" xml:space="preserve">
+    <value>Moved {0} under {1}.</value>
+  </data>
+  <data name="MessageIssueMovedToRootFormat" xml:space="preserve">
+    <value>Moved {0} to the top level.</value>
   </data>
   <data name="DialogDeleteIssueTitle" xml:space="preserve">
     <value>Delete issue</value>

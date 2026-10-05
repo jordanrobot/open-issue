@@ -5,11 +5,13 @@ using System.Collections.Specialized;
 var tests = new (string Name, Action Run)[]
 {
     ("project initialization and discovery", ProjectInitialization),
+    ("project issue list order persists and validates", IssueListOrderPersistence),
     ("nested projects are isolated", NestedProjectIsolation),
     ("dangling project symlinks cannot fall through to a parent project", DanglingProjectLink),
     ("issue creation, listing, search, and Unicode", IssueOperations),
     ("issue-body references and dependencies are parsed", IssueBodyLinks),
     ("parent and child links can be added", IssueRelationshipLinks),
+    ("issues can be reparented and moved to the top level", IssueParentMoves),
     ("creator and timestamp metadata is persisted and immutable", IssueMetadata),
     ("new issues are drafts by default", DraftByDefault),
     ("blank draft titles can be completed before readiness", BlankDraftTitles),
@@ -35,6 +37,9 @@ var tests = new (string Name, Action Run)[]
     ("body edits do not notify the displayed row", ListBodyUpdatesWithoutRedraw),
     ("filter changes remove only excluded rows", ListFilterRemovesOnlyExcludedRows),
     ("list additions and reordering preserve surviving rows", ListReorderingPreservesRows),
+    ("issue list rows form a parent and child tree", IssueListTreeRelationships),
+    ("issue list indentation follows visible tree depth", IssueListDepthFollowsVisibleTree),
+    ("issue list reordering preserves the tree", IssueListReorderPreservesTree),
     ("empty list results remove rows without a reset", ListEmptyResultsWithoutReset),
     ("list row identity cannot be changed", ListRowIdentity)
 };
@@ -68,6 +73,22 @@ static void ProjectInitialization()
     File.WriteAllText(Path.Combine(project.Root, ".issues", "config.json"), "{\"formatVersion\":2}");
     Throws<IssueException>(() => ProjectLocator.Find(project.Root));
     True(!Directory.Exists(Path.Combine(project.Root, ".git")), "test project unexpectedly has Git metadata");
+}
+
+static void IssueListOrderPersistence()
+{
+    using var project = new TemporaryProject();
+    var store = new IssueListOrderStore(project.Root);
+    Equal(0, store.Load().Count);
+
+    store.Save([3, 1, 2]);
+    Equal("3,1,2", string.Join(',', store.Load()));
+    Throws<IssueException>(() => store.Save([1, 1]));
+    Throws<IssueException>(() => store.Save([0]));
+    Equal("3,1,2", string.Join(',', store.Load()));
+
+    File.WriteAllText(Path.Combine(project.Root, ".issues", "issue-list-order.json"), "[1,");
+    Throws<IssueException>(() => store.Load());
 }
 
 static void DanglingProjectLink()
@@ -177,6 +198,35 @@ static void IssueRelationshipLinks()
     service.AddChildren(parent.Id.ToString(), [child.Id]);
     Equal(child.Id.ToString(), string.Join(',', service.Show(parent.Id.ToString()).Children));
     Throws<IssueException>(() => service.AddChildren(parent.Id.ToString(), [long.MaxValue]));
+}
+
+static void IssueParentMoves()
+{
+    using var project = new TemporaryProject();
+    var service = project.Service;
+    var firstParent = service.Create("First parent", "");
+    var secondParent = service.Create("Second parent", "");
+    var newParent = service.Create("New parent", "");
+    var child = service.Create("Child", "");
+
+    service.AddParents(child.Id.ToString(), [firstParent.Id, secondParent.Id]);
+    service.AddChildren(firstParent.Id.ToString(), [child.Id]);
+    service.AddChildren(secondParent.Id.ToString(), [child.Id]);
+
+    var moved = service.MoveToParent(child.Id.ToString(), newParent.Id);
+    Equal(newParent.Id.ToString(), string.Join(',', moved.Parents));
+    Equal(0, service.Show(firstParent.Id.ToString()).Children.Count);
+    Equal(0, service.Show(secondParent.Id.ToString()).Children.Count);
+
+    True(service.MoveToRoot(child.Id.ToString()), "the child was not moved to the top level");
+    Equal(0, service.Show(child.Id.ToString()).Parents.Count);
+    True(!service.MoveToRoot(child.Id.ToString()), "moving a top-level issue reported a change");
+
+    var explicitlyLinkedChild = service.Create("Explicit child", "");
+    service.AddChildren(newParent.Id.ToString(), [explicitlyLinkedChild.Id]);
+    True(service.MoveToRoot(explicitlyLinkedChild.Id.ToString()),
+        "an explicit parent children link was not removed");
+    Equal(0, service.Show(newParent.Id.ToString()).Children.Count);
 }
 
 static void IssueMetadata()
@@ -682,6 +732,81 @@ static void ListReorderingPreservesRows()
         "reordering replaced surviving rows");
     True(actions.SequenceEqual([NotifyCollectionChangedAction.Move, NotifyCollectionChangedAction.Add]),
         "reordering performed unnecessary collection changes");
+}
+
+static void IssueListTreeRelationships()
+{
+    var parent = ListIssue(1, "Parent");
+    parent.Children = [3];
+    var child = ListIssue(2, "Child");
+    child.Parents = [1];
+    var explicitlyListedChild = ListIssue(3, "Explicit child");
+    var otherRoot = ListIssue(4, "Other root");
+    var rows = new IssueListCollection();
+
+    rows.Synchronize([parent, child, explicitlyListedChild, otherRoot]);
+
+    True(rows.RootItems.Select(row => row.Id).SequenceEqual([1L, 4L]),
+        "issues with parent links were not nested under their parent");
+    True(rows.RootItems[0].Children.Select(row => row.Id).SequenceEqual([2L, 3L]),
+        "the tree did not combine parent and child relationship metadata");
+    True(rows.Single(row => row.Id == 2).IsNested,
+        "an issue with a parent was not marked as nested");
+    rows.SetDropHint(2, IssueDropHint.Nest);
+    Equal(IssueDropHint.Nest, rows.Single(row => row.Id == 2).DropHint);
+    rows.ClearDropHints();
+    Equal(IssueDropHint.None, rows.Single(row => row.Id == 2).DropHint);
+
+    var first = ListIssue(10, "First cycle member");
+    first.Parents = [11];
+    var second = ListIssue(11, "Second cycle member");
+    second.Parents = [10];
+    rows.Synchronize([first, second]);
+    Equal(1, rows.RootItems.Count);
+    Equal(1, rows.RootItems[0].Children.Count);
+}
+
+static void IssueListDepthFollowsVisibleTree()
+{
+    var parent = ListIssue(1, "Parent");
+    var child = ListIssue(2, "Child");
+    child.Parents = [1];
+    var grandchild = ListIssue(3, "Grandchild");
+    grandchild.Parents = [2];
+    var rows = new IssueListCollection();
+
+    rows.Synchronize([parent, child, grandchild]);
+
+    Equal(0, rows.Single(row => row.Id == parent.Id).Depth);
+    Equal(1, rows.Single(row => row.Id == child.Id).Depth);
+    Equal(2, rows.Single(row => row.Id == grandchild.Id).Depth);
+
+    rows.Synchronize([grandchild]);
+    Equal(0, rows.Single().Depth);
+    True(rows.Single().IsNested, "a filtered parent link was not retained for the root-level row");
+    True(ReferenceEquals(rows.Single(), rows.RootItems.Single()),
+        "a row whose parent was filtered out was not displayed at the root");
+}
+
+static void IssueListReorderPreservesTree()
+{
+    var parent = ListIssue(1, "Parent");
+    var child = ListIssue(2, "Child");
+    child.Parents = [1];
+    var otherRoot = ListIssue(3, "Other root");
+    var rows = new IssueListCollection();
+    rows.Synchronize([parent, child, otherRoot]);
+    var parentRow = rows.Single(row => row.Id == parent.Id);
+    var childRow = rows.Single(row => row.Id == child.Id);
+
+    rows.Reorder([3, 1, 2]);
+
+    True(rows.Select(row => row.Id).SequenceEqual([3L, 1L, 2L]),
+        "the flat issue order did not change");
+    True(rows.RootItems.Select(row => row.Id).SequenceEqual([3L, 1L]),
+        "the root rows did not follow the saved order");
+    True(ReferenceEquals(parentRow.Children.Single(), childRow),
+        "reordering replaced or detached the child row");
 }
 
 static void ListEmptyResultsWithoutReset()

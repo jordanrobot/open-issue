@@ -174,6 +174,60 @@ public sealed class IssueService(IssueRepository repository)
             : Edit(idOrPrefix, children: children, expectedRevision: expectedRevision ?? current.Revision);
     }
 
+    /// <summary>Moves an issue under a different parent, removing its previous parent links.</summary>
+    /// <param name="childIdOrPrefix">The issue being moved.</param>
+    /// <param name="parentId">The new parent issue ID.</param>
+    /// <returns>The updated child issue.</returns>
+    public Issue MoveToParent(string childIdOrPrefix, long parentId)
+    {
+        var child = Resolve(childIdOrPrefix);
+        var parentIdText = parentId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var parent = Resolve(parentIdText);
+        if (child.Id == parent.Id)
+        {
+            throw new IssueException("An issue cannot be its own parent.");
+        }
+
+        if (child.Parents.Contains(parent.Id) || parent.Children.Contains(child.Id))
+        {
+            return child;
+        }
+
+        var allIssues = Repository.List().Issues;
+        var oldParents = allIssues
+            .Where(candidate => candidate.Id != parent.Id && candidate.Children.Contains(child.Id))
+            .ToArray();
+        var linked = AddParents(childIdOrPrefix, [parent.Id], child.Revision);
+        var moved = linked.Parents.SequenceEqual([parent.Id])
+            ? linked
+            : Edit(
+                childIdOrPrefix,
+                parents: [parent.Id],
+                expectedRevision: linked.Revision);
+        RemoveExplicitChildReferences(child.Id, oldParents);
+        return Resolve(childIdOrPrefix);
+    }
+
+    /// <summary>Removes all parent relationships from an issue.</summary>
+    /// <param name="idOrPrefix">The issue to move to the top level.</param>
+    /// <returns><see langword="true"/> when one or more parent links were removed.</returns>
+    public bool MoveToRoot(string idOrPrefix)
+    {
+        var child = Resolve(idOrPrefix);
+        var parentsWithExplicitChildren = Repository.List().Issues
+            .Where(parent => parent.Children.Contains(child.Id))
+            .ToArray();
+        var changed = RemoveExplicitChildReferences(child.Id, parentsWithExplicitChildren);
+        child = Resolve(idOrPrefix);
+        if (child.Parents.Count == 0)
+        {
+            return changed;
+        }
+
+        Edit(idOrPrefix, parents: [], expectedRevision: child.Revision);
+        return true;
+    }
+
     public Issue SetStatus(string idOrPrefix, IssueStatus status)
     {
         var current = Resolve(idOrPrefix);
@@ -209,5 +263,27 @@ public sealed class IssueService(IssueRepository repository)
             .ThenBy(issue => issue.CreatedAt)
             .ThenBy(issue => issue.Id)
             .FirstOrDefault();
+    }
+
+    private bool RemoveExplicitChildReferences(long childId, IEnumerable<Issue> parents)
+    {
+        var changed = false;
+        foreach (var parent in parents)
+        {
+            var parentId = parent.Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var current = Resolve(parentId);
+            if (!current.Children.Contains(childId))
+            {
+                continue;
+            }
+
+            Edit(
+                parentId,
+                children: current.Children.Where(id => id != childId),
+                expectedRevision: current.Revision);
+            changed = true;
+        }
+
+        return changed;
     }
 }

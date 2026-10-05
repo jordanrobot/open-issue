@@ -31,8 +31,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private readonly ResourceLoader _resources = new();
     private readonly Dictionary<long, string> _knownRevisions = [];
     private readonly SemaphoreSlim _saveGate = new(1, 1);
+    private readonly SemaphoreSlim _orderGate = new(1, 1);
     private IReadOnlyList<Issue> _availableIssues = [];
+    private IReadOnlyList<long> _issueOrder = [];
+    private string _draggedIssueLabel = string.Empty;
     private IssueService? _service;
+    private IssueListOrderStore? _issueListOrderStore;
     private CancellationTokenSource? _refreshCancellation;
     private long _refreshVersion;
 
@@ -45,6 +49,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         IssueTags = string.Empty;
         IsDraft = true;
         StatusMessage = string.Empty;
+        DropPreviewText = string.Empty;
 
         StatusFilterOptions =
         [
@@ -103,12 +108,18 @@ public sealed partial class MainWindowViewModel : ObservableObject
             SelectedIssue.UpdatedAt.ToLocalTime().ToString("g", CultureInfo.CurrentCulture));
 
     public string ParentIssuesText =>
-        Format("ParentIssuesFormat", FormatIssueRelationships(SelectedIssue?.Parents));
+        Format(
+            "ParentIssuesFormat",
+            FormatIssueRelationships(SelectedIssue is { } issue ? ParentIssueIds(issue) : null));
 
     public string ChildIssuesText =>
-        Format("ChildIssuesFormat", FormatIssueRelationships(SelectedIssue?.Children));
+        Format(
+            "ChildIssuesFormat",
+            FormatIssueRelationships(SelectedIssue is { } issue ? ChildIssueIds(issue) : null));
 
     public string IssueListAutomationName => GetString("IssueListName");
+
+    public string IssueListDragDropDescription => GetString("IssueListDragDropDescription");
 
     public string IssueListSplitterAutomationName => GetString("IssueListSplitterName");
 
@@ -142,6 +153,11 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     /// <summary>Gets whether the selected issue can be deleted without interrupting a save.</summary>
     public bool IsDeleteEnabled => IsEditorEnabled && !IsSaving;
+
+    public string DisplayStatusMessage =>
+        IsDraggingIssue && !string.IsNullOrEmpty(DropPreviewText)
+            ? DropPreviewText
+            : StatusMessage;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(WindowTitle))]
@@ -204,7 +220,16 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public partial bool IsRefreshing { get; set; }
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayStatusMessage))]
     public partial string StatusMessage { get; set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayStatusMessage))]
+    public partial bool IsDraggingIssue { get; set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayStatusMessage))]
+    public partial string DropPreviewText { get; set; }
 
     [ObservableProperty]
     public partial bool HasIssueReferenceSuggestions { get; private set; }
@@ -218,6 +243,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
             return path;
         });
 
+        var orderStore = new IssueListOrderStore(root);
+        var issueOrder = await Task.Run(orderStore.Load);
+        _issueListOrderStore = orderStore;
+        _issueOrder = issueOrder;
         _service = new IssueService(new IssueRepository(root));
         ProjectRoot = root;
         return issuesDirectory;
@@ -299,6 +328,188 @@ public sealed partial class MainWindowViewModel : ObservableObject
         StatusMessage = GetString("MessageIssueLinksSaved");
     }
 
+    /// <summary>Adds a parent relationship for an issue moved onto another issue in the tree.</summary>
+    /// <param name="childIssueId">The issue being moved.</param>
+    /// <param name="parentIssueId">The issue that will contain the moved issue.</param>
+    public async Task AddParentIssueAsync(long childIssueId, long parentIssueId)
+    {
+        if (childIssueId == parentIssueId)
+        {
+            throw new IssueException("An issue cannot be its own parent.");
+        }
+
+        var service = _service ?? throw new IssueException("The issue project has not been initialized.");
+        var current = await Task.Run(
+            () => service.Resolve(childIssueId.ToString(CultureInfo.InvariantCulture)));
+        if (current.Parents.Contains(parentIssueId))
+        {
+            ExpandIssueRow(parentIssueId);
+            return;
+        }
+
+        var saved = await Task.Run(() => service.AddParents(
+            childIssueId.ToString(CultureInfo.InvariantCulture),
+            [parentIssueId],
+            current.Revision));
+        _knownRevisions[saved.Id] = saved.Revision;
+        ReplaceIssueInList(saved);
+        ExpandIssueRow(parentIssueId);
+        if (SelectedIssue?.Id == saved.Id)
+        {
+            SelectedIssue = saved;
+        }
+
+        StatusMessage = GetString("MessageIssueLinksSaved");
+    }
+
+    /// <summary>Moves an issue under a new parent in the issue tree.</summary>
+    /// <param name="childIssueId">The issue being moved.</param>
+    /// <param name="parentIssueId">The new parent issue ID.</param>
+    public async Task MoveIssueUnderParentAsync(long childIssueId, long parentIssueId)
+    {
+        if (childIssueId == parentIssueId)
+        {
+            throw new IssueException("An issue cannot be its own parent.");
+        }
+
+        var service = _service ?? throw new IssueException("The issue project has not been initialized.");
+        var moved = await Task.Run(() => service.MoveToParent(
+            childIssueId.ToString(CultureInfo.InvariantCulture),
+            parentIssueId));
+        _knownRevisions[moved.Id] = moved.Revision;
+        if (await RefreshIssuesAsync(preserveCurrentEditor: true))
+        {
+            ExpandIssueRow(parentIssueId);
+            var parent = _availableIssues.FirstOrDefault(issue => issue.Id == parentIssueId);
+            StatusMessage = Format(
+                "MessageIssueMovedUnderFormat",
+                FormatIssueLabel(moved.Id, moved.Title),
+                FormatIssueLabel(parentIssueId, parent?.Title ?? string.Empty));
+        }
+    }
+
+    /// <summary>Removes all parent links so an issue becomes a root-level item.</summary>
+    /// <param name="issueId">The issue to move to the top level.</param>
+    public async Task MoveIssueToRootAsync(long issueId)
+    {
+        var service = _service ?? throw new IssueException("The issue project has not been initialized.");
+        var changed = await Task.Run(() =>
+            service.MoveToRoot(issueId.ToString(CultureInfo.InvariantCulture)));
+        if (!changed)
+        {
+            return;
+        }
+
+        if (await RefreshIssuesAsync(preserveCurrentEditor: true))
+        {
+            var issue = _availableIssues.FirstOrDefault(candidate => candidate.Id == issueId);
+            StatusMessage = Format(
+                "MessageIssueMovedToRootFormat",
+                FormatIssueLabel(issueId, issue?.Title ?? string.Empty));
+        }
+    }
+
+    /// <summary>Begins a drag and displays the issue being moved.</summary>
+    /// <param name="issue">The issue row being dragged.</param>
+    public void BeginIssueDrag(IssueListItem issue)
+    {
+        ArgumentNullException.ThrowIfNull(issue);
+        _draggedIssueLabel = FormatIssueLabel(issue.Id, issue.Title);
+        IsDraggingIssue = true;
+        Issues.ClearDropHints();
+        DropPreviewText = Format("IssueListDragStartFormat", _draggedIssueLabel);
+    }
+
+    /// <summary>Shows the proposed before, after, or child destination for a dragged issue.</summary>
+    /// <param name="targetIssueId">The issue currently under the pointer.</param>
+    /// <param name="dropHint">The proposed destination relative to the target.</param>
+    public void UpdateIssueDropHint(long targetIssueId, IssueDropHint dropHint)
+    {
+        var target = Issues.FirstOrDefault(issue => issue.Id == targetIssueId);
+        if (target is null)
+        {
+            return;
+        }
+
+        Issues.SetDropHint(targetIssueId, dropHint);
+        var targetLabel = FormatIssueLabel(target.Id, target.Title);
+        DropPreviewText = dropHint switch
+        {
+            IssueDropHint.Before => Format("IssueListDropBeforeFormat", _draggedIssueLabel, targetLabel),
+            IssueDropHint.After => Format("IssueListDropAfterFormat", _draggedIssueLabel, targetLabel),
+            IssueDropHint.Nest => Format("IssueListDropAsChildFormat", _draggedIssueLabel, targetLabel),
+            _ => Format("IssueListDragStartFormat", _draggedIssueLabel)
+        };
+    }
+
+    /// <summary>Shows the top-level destination while a nested issue is over an open tree area.</summary>
+    public void SetRootDropPreview()
+    {
+        Issues.ClearDropHints();
+        DropPreviewText = Format("IssueListDropToRootFormat", _draggedIssueLabel);
+    }
+
+    /// <summary>Clears the temporary drag-and-drop state.</summary>
+    public void EndIssueDrag()
+    {
+        IsDraggingIssue = false;
+        _draggedIssueLabel = string.Empty;
+        DropPreviewText = string.Empty;
+        Issues.ClearDropHints();
+    }
+
+    /// <summary>Clears the current row highlight when the pointer leaves its target.</summary>
+    public void ClearIssueDropHint()
+    {
+        Issues.ClearDropHints();
+        if (IsDraggingIssue)
+        {
+            DropPreviewText = Format("IssueListDragStartFormat", _draggedIssueLabel);
+        }
+    }
+
+    /// <summary>Persists a completed tree drag while retaining the positions of filtered-out issues.</summary>
+    /// <param name="visibleIssueIds">Visible issue IDs in their current tree order.</param>
+    public async Task PersistVisibleIssueOrderAsync(IReadOnlyList<long> visibleIssueIds)
+    {
+        ArgumentNullException.ThrowIfNull(visibleIssueIds);
+        var orderStore = _issueListOrderStore
+            ?? throw new IssueException("The issue list order has not been initialized.");
+        await _orderGate.WaitAsync();
+        try
+        {
+            var includedIds = _issueOrder.ToHashSet();
+            var visibleOrder = visibleIssueIds
+                .Where(includedIds.Contains)
+                .Distinct()
+                .ToArray();
+            var visibleIds = visibleOrder.ToHashSet();
+            var nextOrder = _issueOrder.ToList();
+            var visibleIndex = 0;
+            for (var index = 0; index < nextOrder.Count; index++)
+            {
+                if (visibleIds.Contains(nextOrder[index]))
+                {
+                    nextOrder[index] = visibleOrder[visibleIndex++];
+                }
+            }
+
+            if (nextOrder.SequenceEqual(_issueOrder))
+            {
+                return;
+            }
+
+            await Task.Run(() => orderStore.Save(nextOrder));
+            _issueOrder = nextOrder;
+            Issues.Reorder(_issueOrder);
+            StatusMessage = GetString("MessageIssueListOrderSaved");
+        }
+        finally
+        {
+            _orderGate.Release();
+        }
+    }
+
     [RelayCommand(AllowConcurrentExecutions = true)]
     private async Task RefreshAsync()
     {
@@ -350,6 +561,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 return false;
             }
 
+            await ReconcileIssueOrderAsync(result.AllIssues, cancellation.Token);
+            if (cancellation.IsCancellationRequested || version != _refreshVersion)
+            {
+                return false;
+            }
+
             _knownRevisions.Clear();
             foreach (var issue in result.Listed.Issues)
             {
@@ -360,7 +577,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
             OnPropertyChanged(nameof(ParentIssuesText));
             OnPropertyChanged(nameof(ChildIssuesText));
             ClearIssueReferenceSuggestions();
-            Issues.Synchronize(result.Matches);
+            Issues.Synchronize(OrderIssues(result.Matches));
+            UpdateNestedIssueState();
 
             var selected = currentId is null
                 ? null
@@ -641,6 +859,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         if (!Issues.Any(candidate => candidate.Id == issue.Id))
         {
             Issues.Add(new IssueListItem(created));
+            Issues.RebuildHierarchy();
         }
 
         LoadIssue(created);
@@ -673,6 +892,44 @@ public sealed partial class MainWindowViewModel : ObservableObject
             Status: status is null or "all" ? null : ParseStatus(status),
             Priority: priority is null or "all" ? null : ParsePriority(priority),
             Draft: ReadyOnly ? false : null);
+    }
+
+    private async Task ReconcileIssueOrderAsync(
+        IReadOnlyList<Issue> issues,
+        CancellationToken cancellationToken)
+    {
+        var orderStore = _issueListOrderStore
+            ?? throw new IssueException("The issue list order has not been initialized.");
+        await _orderGate.WaitAsync(cancellationToken);
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var availableIds = issues.Select(issue => issue.Id).ToHashSet();
+            var nextOrder = _issueOrder.Where(availableIds.Contains).ToList();
+            var includedIds = nextOrder.ToHashSet();
+            nextOrder.AddRange(issues.Where(issue => includedIds.Add(issue.Id)).Select(issue => issue.Id));
+            if (nextOrder.SequenceEqual(_issueOrder))
+            {
+                return;
+            }
+
+            await Task.Run(() => orderStore.Save(nextOrder));
+            _issueOrder = nextOrder;
+        }
+        finally
+        {
+            _orderGate.Release();
+        }
+    }
+
+    private IReadOnlyList<Issue> OrderIssues(IReadOnlyList<Issue> issues)
+    {
+        var positions = _issueOrder
+            .Select((id, index) => (Id: id, Index: index))
+            .ToDictionary(item => item.Id, item => item.Index);
+        return issues
+            .OrderBy(issue => positions.GetValueOrDefault(issue.Id, int.MaxValue))
+            .ToArray();
     }
 
     private void LoadIssue(Issue? issue)
@@ -737,7 +994,43 @@ public sealed partial class MainWindowViewModel : ObservableObject
         }
 
         existing.Update(issue);
+        Issues.RebuildHierarchy();
+        UpdateNestedIssueState();
     }
+
+    private void UpdateNestedIssueState()
+    {
+        var explicitChildren = _availableIssues
+            .SelectMany(issue => issue.Children)
+            .ToHashSet();
+        foreach (var row in Issues)
+        {
+            row.IsNested = row.Issue.Parents.Count > 0 || explicitChildren.Contains(row.Id);
+        }
+    }
+
+    private void ExpandIssueRow(long issueId)
+    {
+        var row = Issues.FirstOrDefault(candidate => candidate.Id == issueId);
+        if (row is not null)
+        {
+            row.IsExpanded = true;
+        }
+    }
+
+    private IEnumerable<long> ParentIssueIds(Issue issue) =>
+        issue.Parents.Concat(
+            _availableIssues
+                .Where(candidate => candidate.Children.Contains(issue.Id))
+                .Select(candidate => candidate.Id))
+            .Distinct();
+
+    private IEnumerable<long> ChildIssueIds(Issue issue) =>
+        issue.Children.Concat(
+            _availableIssues
+                .Where(candidate => candidate.Parents.Contains(issue.Id))
+                .Select(candidate => candidate.Id))
+            .Distinct();
 
     private string FormatIssueRelationships(IEnumerable<long>? ids)
     {
