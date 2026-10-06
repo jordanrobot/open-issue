@@ -15,8 +15,11 @@
   <data name="AppTitle" xml:space="preserve">
     <value>Open Issue</value>
   </data>
-  <data name="IssueDetailsHeading.Text" xml:space="preserve">
-    <value>Issue details</value>
+  <data name="IssueContentsHeading.Text" xml:space="preserve">
+    <value>Issue Contents</value>
+  </data>
+  <data name="IssueDetailsPaneHeading.Text" xml:space="preserve">
+    <value>Issue Details</value>
   </data>
   <data name="IssueListHeading.Text" xml:space="preserve">
     <value>Issues</value>
@@ -32,6 +35,18 @@
   </data>
   <data name="ExpandIssueListButton.ToolTipService.ToolTip" xml:space="preserve">
     <value>Show issues list</value>
+  </data>
+  <data name="CollapseIssueDetailsButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Collapse issue details pane</value>
+  </data>
+  <data name="CollapseIssueDetailsButton.ToolTipService.ToolTip" xml:space="preserve">
+    <value>Collapse issue details pane</value>
+  </data>
+  <data name="ExpandIssueDetailsButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Show issue details pane</value>
+  </data>
+  <data name="ExpandIssueDetailsButton.ToolTipService.ToolTip" xml:space="preserve">
+    <value>Show issue details pane</value>
   </data>
   <data name="IssueFiltersExpander.Header" xml:space="preserve">
     <value>Filters</value>
@@ -135,6 +150,9 @@
   <data name="IssueListSplitterName" xml:space="preserve">
     <value>Resize the issue list pane</value>
   </data>
+  <data name="IssueDetailsSplitterName" xml:space="preserve">
+    <value>Resize the issue details pane</value>
+  </data>
   <data name="IssueReferenceSuggestionsAutomationName" xml:space="preserve">
     <value>Issue reference suggestions</value>
   </data>
@@ -153,11 +171,26 @@
   <data name="DraftBox.Content" xml:space="preserve">
     <value>Draft</value>
   </data>
-  <data name="TagsBox.Header" xml:space="preserve">
+  <data name="TagsHeading.Text" xml:space="preserve">
     <value>Tags</value>
   </data>
-  <data name="TagsBox.PlaceholderText" xml:space="preserve">
-    <value>Comma-separated tags</value>
+  <data name="TagInput.PlaceholderText" xml:space="preserve">
+    <value>Type a tag and press Enter</value>
+  </data>
+  <data name="TagInput.AutomationProperties.Name" xml:space="preserve">
+    <value>Add a tag</value>
+  </data>
+  <data name="TagPill.AutomationProperties.HelpText" xml:space="preserve">
+    <value>Remove this tag</value>
+  </data>
+  <data name="ParentIssuesHeading.Text" xml:space="preserve">
+    <value>Parents</value>
+  </data>
+  <data name="ChildIssuesHeading.Text" xml:space="preserve">
+    <value>Children</value>
+  </data>
+  <data name="RelatedIssueButton.AutomationProperties.HelpText" xml:space="preserve">
+    <value>Show the linked issue</value>
   </data>
   <data name="BodyBox.Header" xml:space="preserve">
     <value>Issue body</value>
@@ -165,14 +198,11 @@
   <data name="BodyBox.PlaceholderText" xml:space="preserve">
     <value>Describe the issue here. Use #number to reference an issue, or Depends on #number to mark a dependency.</value>
   </data>
-  <data name="ParentIssuesFormat" xml:space="preserve">
-    <value>Parents: {0}</value>
-  </data>
-  <data name="ChildIssuesFormat" xml:space="preserve">
-    <value>Children: {0}</value>
-  </data>
   <data name="NoIssueRelationships" xml:space="preserve">
     <value>None</value>
+  </data>
+  <data name="MessageRelatedIssueNotAvailable" xml:space="preserve">
+    <value>Linked issue #{0} is no longer available.</value>
   </data>
   <data name="SelectIssuePrompt" xml:space="preserve">
     <value>Select an issue or create one to begin editing.</value>

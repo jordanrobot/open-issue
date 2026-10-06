@@ -24,6 +24,7 @@ namespace OpenIssue.Desktop;
 public sealed partial class MainWindow : Window
 {
     private const double CollapsedIssueListColumnWidth = 44;
+    private const double CollapsedIssueDetailsColumnWidth = 44;
     private static readonly ResourceLoader Resources = new();
     private readonly DispatcherQueueTimer _refreshTimer;
     private readonly DispatcherQueueTimer _saveTimer;
@@ -43,6 +44,9 @@ public sealed partial class MainWindow : Window
     private readonly string? _launchArguments;
     private double _expandedIssueListWidth;
     private double _expandedIssueListMinWidth;
+    private double _expandedIssueDetailsWidth;
+    private double _expandedIssueDetailsMinWidth;
+    private long? _tagInputIssueId;
 
     public MainWindowViewModel ViewModel { get; }
 
@@ -66,6 +70,18 @@ public sealed partial class MainWindow : Window
     /// <summary>Shows the nested-row guide for issues that have a parent.</summary>
     public static Visibility NestedIssueVisibility(bool isNested) =>
         isNested ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>Shows the empty state when an issue has no links in a relationship group.</summary>
+    /// <param name="hasRelationships">Whether the relationship group contains any links.</param>
+    /// <returns>Visible when the group is empty.</returns>
+    public static Visibility EmptyRelationshipVisibility(bool hasRelationships) =>
+        hasRelationships ? Visibility.Collapsed : Visibility.Visible;
+
+    /// <summary>Shows relationship links only when the group contains at least one issue.</summary>
+    /// <param name="hasRelationships">Whether the relationship group contains any links.</param>
+    /// <returns>Visible when the group contains links.</returns>
+    public static Visibility RelationshipItemsVisibility(bool hasRelationships) =>
+        hasRelationships ? Visibility.Visible : Visibility.Collapsed;
 
     /// <summary>Reduces the horizontal inset for each visible tree level.</summary>
     /// <param name="depth">The row's depth in the displayed tree.</param>
@@ -145,7 +161,7 @@ public sealed partial class MainWindow : Window
 
         var scale = dpi / 96.0;
         AppWindow.Resize(new SizeInt32(
-            (int)Math.Ceiling(1120 * scale),
+            (int)Math.Ceiling(1280 * scale),
             (int)Math.Ceiling(760 * scale)));
     }
 
@@ -154,6 +170,17 @@ public sealed partial class MainWindow : Window
         if (e.PropertyName == nameof(ViewModel.WindowTitle))
         {
             Title = ViewModel.WindowTitle;
+        }
+
+        if (e.PropertyName == nameof(ViewModel.SelectedIssue))
+        {
+            var selectedId = ViewModel.SelectedIssue?.Id;
+            if (selectedId != _tagInputIssueId)
+            {
+                _tagInputIssueId = selectedId;
+                TagInput.Text = string.Empty;
+                ViewModel.UpdateTagSuggestions(string.Empty);
+            }
         }
     }
 
@@ -689,6 +716,32 @@ public sealed partial class MainWindow : Window
         CollapseIssueListButton.Focus(FocusState.Programmatic);
     }
 
+    private void CollapseIssueDetails_Click(object sender, RoutedEventArgs e)
+    {
+        _expandedIssueDetailsWidth = IssueDetailsColumn.ActualWidth;
+        _expandedIssueDetailsMinWidth = IssueDetailsColumn.MinWidth;
+
+        IssueDetailsColumn.MinWidth = CollapsedIssueDetailsColumnWidth;
+        IssueDetailsColumn.Width = new GridLength(CollapsedIssueDetailsColumnWidth);
+        IssueDetailsPane.Visibility = Visibility.Collapsed;
+        IssueDetailsDivider.Visibility = Visibility.Collapsed;
+        IssueDetailsSplitter.Visibility = Visibility.Collapsed;
+        CollapsedIssueDetailsRail.Visibility = Visibility.Visible;
+        ExpandIssueDetailsButton.Focus(FocusState.Programmatic);
+    }
+
+    private void ExpandIssueDetails_Click(object sender, RoutedEventArgs e)
+    {
+        IssueDetailsColumn.MinWidth = _expandedIssueDetailsMinWidth;
+        IssueDetailsColumn.Width = new GridLength(
+            Math.Max(_expandedIssueDetailsWidth, _expandedIssueDetailsMinWidth));
+        IssueDetailsPane.Visibility = Visibility.Visible;
+        IssueDetailsDivider.Visibility = Visibility.Visible;
+        IssueDetailsSplitter.Visibility = Visibility.Visible;
+        CollapsedIssueDetailsRail.Visibility = Visibility.Collapsed;
+        CollapseIssueDetailsButton.Focus(FocusState.Programmatic);
+    }
+
     private void ScheduleFilterRefresh()
     {
         if (ViewModel.IsLoadingIssue)
@@ -754,6 +807,40 @@ public sealed partial class MainWindow : Window
 
     private async void AddChildIssuesButton_Click(object sender, RoutedEventArgs e) =>
         await AddIssueRelationshipsAsync(addingParents: false);
+
+    private async void RelatedIssue_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: long issueId } ||
+            ViewModel.SelectedIssue?.Id == issueId)
+        {
+            return;
+        }
+
+        var row = ViewModel.Issues.FirstOrDefault(candidate => candidate.Id == issueId);
+        if (row is null)
+        {
+            ViewModel.SearchText = string.Empty;
+            ViewModel.SelectedStatusFilter = ViewModel.StatusFilterOptions[0];
+            ViewModel.SelectedPriorityFilter = ViewModel.PriorityFilterOptions[0];
+            ViewModel.DraftOnly = false;
+            _refreshTimer.Stop();
+            if (!await ViewModel.RefreshIssuesAsync(preserveCurrentEditor: true))
+            {
+                return;
+            }
+
+            row = ViewModel.Issues.FirstOrDefault(candidate => candidate.Id == issueId);
+        }
+
+        if (row is null)
+        {
+            ViewModel.StatusMessage = Format("MessageRelatedIssueNotAvailable", issueId);
+            return;
+        }
+
+        ViewModel.ExpandIssueAncestors(issueId);
+        IssueList.SelectedItem = row;
+    }
 
     private async Task AddIssueRelationshipsAsync(bool addingParents)
     {
@@ -911,6 +998,11 @@ public sealed partial class MainWindow : Window
 
     private void Editor_Changed(object sender, RoutedEventArgs e)
     {
+        ScheduleEditorSave();
+    }
+
+    private void ScheduleEditorSave()
+    {
         if (ViewModel.IsLoadingIssue || ViewModel.SelectedIssue is null)
         {
             return;
@@ -919,6 +1011,62 @@ public sealed partial class MainWindow : Window
         ViewModel.StatusMessage = GetString("MessageSavingChanges");
         _saveTimer.Stop();
         _saveTimer.Start();
+    }
+
+    private void TagInput_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs e)
+    {
+        if (e.Reason is not AutoSuggestionBoxTextChangeReason.UserInput)
+        {
+            return;
+        }
+
+        var separatorIndex = sender.Text.LastIndexOf(',');
+        if (separatorIndex >= 0)
+        {
+            if (ViewModel.AddIssueTags(sender.Text[..separatorIndex]))
+            {
+                ScheduleEditorSave();
+            }
+
+            sender.Text = sender.Text[(separatorIndex + 1)..].TrimStart();
+        }
+
+        ViewModel.UpdateTagSuggestions(sender.Text);
+    }
+
+    private void TagInput_SuggestionChosen(
+        AutoSuggestBox sender,
+        AutoSuggestBoxSuggestionChosenEventArgs e)
+    {
+        if (e.SelectedItem is string tag && ViewModel.AddIssueTags(tag))
+        {
+            ScheduleEditorSave();
+        }
+
+        sender.Text = string.Empty;
+        ViewModel.UpdateTagSuggestions(string.Empty);
+    }
+
+    private void TagInput_QuerySubmitted(
+        AutoSuggestBox sender,
+        AutoSuggestBoxQuerySubmittedEventArgs e)
+    {
+        var tagText = e.ChosenSuggestion as string ?? sender.Text;
+        if (ViewModel.AddIssueTags(tagText))
+        {
+            ScheduleEditorSave();
+        }
+
+        sender.Text = string.Empty;
+        ViewModel.UpdateTagSuggestions(string.Empty);
+    }
+
+    private void TagPill_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string tag } && ViewModel.RemoveIssueTag(tag))
+        {
+            ScheduleEditorSave();
+        }
     }
 
     private void BodyBox_TextChanged(object sender, TextChangedEventArgs e)
