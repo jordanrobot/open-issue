@@ -12,11 +12,12 @@
             <x:Double x:Key="TreeViewItemMinHeight">28</x:Double>
         </Grid.Resources>
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="360" MinWidth="320" />
+            <ColumnDefinition x:Name="IssueListColumn" Width="360" MinWidth="320" />
             <ColumnDefinition Width="Auto" />
             <ColumnDefinition Width="*" MinWidth="480" />
         </Grid.ColumnDefinitions>
         <Border
+            x:Name="IssueListPane"
             Grid.Column="0"
             Padding="16"
             Background="{ThemeResource LayerFillColorDefaultBrush}"
@@ -27,12 +28,13 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
-                <Grid Grid.Row="0" Margin="0,0,0,16">
+                <Grid
+                    Grid.Row="0"
+                    Margin="0,0,0,16"
+                    ColumnSpacing="8">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
@@ -40,70 +42,88 @@
                     <TextBlock
                         x:Uid="IssueListHeading"
                         Style="{StaticResource TitleTextBlockStyle}"
+                        FontSize="20"
                         VerticalAlignment="Center" />
                     <Button
-                        x:Name="NewIssueButton"
-                        x:Uid="NewIssueButton"
+                        x:Name="CollapseIssueListButton"
+                        x:Uid="CollapseIssueListButton"
                         Grid.Column="1"
-                        Click="NewIssue_Click"
-                        Style="{StaticResource AccentButtonStyle}"
-                        AutomationProperties.AutomationId="NewIssueButton" />
+                        Width="24"
+                        Height="24"
+                        MinWidth="24"
+                        MinHeight="24"
+                        Padding="0"
+                        VerticalAlignment="Center"
+                        Click="CollapseIssueList_Click"
+                        AutomationProperties.AutomationId="CollapseIssueListButton">
+                        <FontIcon
+                            Glyph="&#xE76B;"
+                            FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                            FontSize="14" />
+                    </Button>
                 </Grid>
-                <AutoSuggestBox
-                    x:Name="SearchBox"
-                    x:Uid="SearchBox"
+                <Expander
+                    x:Name="IssueFiltersExpander"
+                    x:Uid="IssueFiltersExpander"
                     Grid.Row="1"
-                    Margin="0,0,0,12"
-                    QueryIcon="Find"
-                    Text="{x:Bind ViewModel.SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                    TextChanged="SearchBox_TextChanged"
-                    AutomationProperties.AutomationId="SearchIssues"
-                    AutomationProperties.Name="{x:Bind ViewModel.SearchBoxAutomationName, Mode=OneTime}" />
-                <StackPanel
-                    Grid.Row="2"
-                    Margin="0,0,0,8"
-                    Orientation="Horizontal"
-                    Spacing="8">
-                    <ComboBox
-                        x:Name="StatusFilter"
-                        x:Uid="StatusFilter"
-                        Width="136"
-                        ItemsSource="{x:Bind ViewModel.StatusFilterOptions, Mode=OneTime}"
-                        SelectedItem="{x:Bind ViewModel.SelectedStatusFilter, Mode=TwoWay}"
-                        SelectionChanged="Filter_Changed"
-                        AutomationProperties.AutomationId="StatusFilter">
-                        <ComboBox.ItemTemplate>
-                            <DataTemplate x:DataType="local:FilterChoice">
-                                <TextBlock Text="{x:Bind Display, Mode=OneTime}" />
-                            </DataTemplate>
-                        </ComboBox.ItemTemplate>
-                    </ComboBox>
-                    <ComboBox
-                        x:Name="PriorityFilter"
-                        x:Uid="PriorityFilter"
-                        Width="136"
-                        ItemsSource="{x:Bind ViewModel.PriorityFilterOptions, Mode=OneTime}"
-                        SelectedItem="{x:Bind ViewModel.SelectedPriorityFilter, Mode=TwoWay}"
-                        SelectionChanged="Filter_Changed"
-                        AutomationProperties.AutomationId="PriorityFilter">
-                        <ComboBox.ItemTemplate>
-                            <DataTemplate x:DataType="local:FilterChoice">
-                                <TextBlock Text="{x:Bind Display, Mode=OneTime}" />
-                            </DataTemplate>
-                        </ComboBox.ItemTemplate>
-                    </ComboBox>
-                </StackPanel>
-                <CheckBox
-                    x:Name="ReadyFilter"
-                    x:Uid="ReadyFilter"
-                    Grid.Row="3"
-                    Margin="0,0,0,8"
-                    IsChecked="{x:Bind ViewModel.ReadyOnly, Mode=TwoWay}"
-                    VerticalAlignment="Center"
-                    Checked="Filter_Changed"
-                    Unchecked="Filter_Changed"
-                    AutomationProperties.AutomationId="ReadyFilter" />
-                <Grid Grid.Row="4">
+                    IsExpanded="False"
+                    MinHeight="40"
+                    HorizontalAlignment="Stretch"
+                    HorizontalContentAlignment="Stretch"
+                    Margin="0,0,0,4"
+                    AutomationProperties.AutomationId="IssueFiltersExpander">
+                    <StackPanel Spacing="4">
+                        <AutoSuggestBox
+                            x:Name="SearchBox"
+                            x:Uid="SearchBox"
+                            QueryIcon="Find"
+                            Text="{x:Bind ViewModel.SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                            TextChanged="SearchBox_TextChanged"
+                            AutomationProperties.AutomationId="SearchIssues"
+                            AutomationProperties.Name="{x:Bind ViewModel.SearchBoxAutomationName, Mode=OneTime}" />
+                        <StackPanel
+                            Orientation="Horizontal"
+                            Spacing="8">
+                            <ComboBox
+                                x:Name="StatusFilter"
+                                x:Uid="StatusFilter"
+                                Width="136"
+                                ItemsSource="{x:Bind ViewModel.StatusFilterOptions, Mode=OneTime}"
+                                SelectedItem="{x:Bind ViewModel.SelectedStatusFilter, Mode=TwoWay}"
+                                SelectionChanged="Filter_Changed"
+                                AutomationProperties.AutomationId="StatusFilter">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate x:DataType="local:FilterChoice">
+                                        <TextBlock Text="{x:Bind Display, Mode=OneTime}" />
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+                            <ComboBox
+                                x:Name="PriorityFilter"
+                                x:Uid="PriorityFilter"
+                                Width="136"
+                                ItemsSource="{x:Bind ViewModel.PriorityFilterOptions, Mode=OneTime}"
+                                SelectedItem="{x:Bind ViewModel.SelectedPriorityFilter, Mode=TwoWay}"
+                                SelectionChanged="Filter_Changed"
+                                AutomationProperties.AutomationId="PriorityFilter">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate x:DataType="local:FilterChoice">
+                                        <TextBlock Text="{x:Bind Display, Mode=OneTime}" />
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+                        </StackPanel>
+                        <CheckBox
+                            x:Name="DraftOnlyFilter"
+                            x:Uid="DraftOnlyFilter"
+                            IsChecked="{x:Bind ViewModel.DraftOnly, Mode=TwoWay}"
+                            VerticalAlignment="Center"
+                            Checked="Filter_Changed"
+                            Unchecked="Filter_Changed"
+                            AutomationProperties.AutomationId="DraftOnlyFilter" />
+                    </StackPanel>
+                </Expander>
+                <Grid Grid.Row="2">
                     <TreeView
                         x:Name="IssueList"
                         ItemsSource="{x:Bind ViewModel.Issues.RootItems, Mode=OneWay}"
@@ -112,6 +132,7 @@
                         CanDragItems="True"
                         CanReorderItems="True"
                         AllowDrop="True"
+                        Margin="-12,0,0,0"
                         DragItemsStarting="IssueList_DragItemsStarting"
                         DragItemsCompleted="IssueList_DragItemsCompleted"
                         DragOver="IssueList_DragOver"
@@ -220,10 +241,16 @@
                     </Border>
                 </Grid>
                 <StackPanel
-                    Grid.Row="5"
+                    Grid.Row="3"
                     Margin="0,12,0,0"
                     Orientation="Horizontal"
                     Spacing="8">
+                    <Button
+                        x:Name="NewIssueButton"
+                        x:Uid="NewIssueButton"
+                        Click="NewIssue_Click"
+                        Style="{StaticResource AccentButtonStyle}"
+                        AutomationProperties.AutomationId="NewIssueButton" />
                     <Button
                         x:Name="RefreshButton"
                         x:Uid="RefreshButton"
@@ -239,6 +266,35 @@
             </Grid>
         </Border>
         <Border
+            x:Name="CollapsedIssueListRail"
+            Grid.Column="0"
+            Padding="4"
+            Background="{ThemeResource LayerFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Visibility="Collapsed"
+            AutomationProperties.AutomationId="CollapsedIssueListRail">
+            <Button
+                x:Name="ExpandIssueListButton"
+                x:Uid="ExpandIssueListButton"
+                Width="24"
+                Height="24"
+                MinWidth="24"
+                MinHeight="24"
+                Padding="0"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Top"
+                Click="ExpandIssueList_Click"
+                AutomationProperties.AutomationId="ExpandIssueListButton">
+                <FontIcon
+                    Glyph="&#xE76C;"
+                    FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                    FontSize="14" />
+            </Button>
+        </Border>
+        <Border
+            x:Name="IssueListDivider"
             Grid.Column="1"
             Width="1"
             HorizontalAlignment="Center"
@@ -281,7 +337,8 @@
                     Spacing="4">
                     <TextBlock
                         x:Uid="IssueDetailsHeading"
-                        Style="{StaticResource TitleTextBlockStyle}" />
+                        Style="{StaticResource TitleTextBlockStyle}"
+                        FontSize="20" />
                     <TextBlock
                         x:Name="MetadataText"
                         Text="{x:Bind ViewModel.MetadataText, Mode=OneWay}"

@@ -23,6 +23,7 @@ namespace OpenIssue.Desktop;
 
 public sealed partial class MainWindow : Window
 {
+    private const double CollapsedIssueListColumnWidth = 44;
     private static readonly ResourceLoader Resources = new();
     private readonly DispatcherQueueTimer _refreshTimer;
     private readonly DispatcherQueueTimer _saveTimer;
@@ -40,6 +41,8 @@ public sealed partial class MainWindow : Window
     private long? _dropTargetIssueId;
     private IssueDropHint _dropHint;
     private readonly string? _launchArguments;
+    private double _expandedIssueListWidth;
+    private double _expandedIssueListMinWidth;
 
     public MainWindowViewModel ViewModel { get; }
 
@@ -659,6 +662,32 @@ public sealed partial class MainWindow : Window
 
     private void Filter_Changed(object sender, RoutedEventArgs e) =>
         ScheduleFilterRefresh();
+
+    private void CollapseIssueList_Click(object sender, RoutedEventArgs e)
+    {
+        _expandedIssueListWidth = IssueListColumn.ActualWidth;
+        _expandedIssueListMinWidth = IssueListColumn.MinWidth;
+
+        IssueListColumn.MinWidth = CollapsedIssueListColumnWidth;
+        IssueListColumn.Width = new GridLength(CollapsedIssueListColumnWidth);
+        IssueListPane.Visibility = Visibility.Collapsed;
+        IssueListDivider.Visibility = Visibility.Collapsed;
+        IssueListSplitter.Visibility = Visibility.Collapsed;
+        CollapsedIssueListRail.Visibility = Visibility.Visible;
+        ExpandIssueListButton.Focus(FocusState.Programmatic);
+    }
+
+    private void ExpandIssueList_Click(object sender, RoutedEventArgs e)
+    {
+        IssueListColumn.MinWidth = _expandedIssueListMinWidth;
+        IssueListColumn.Width = new GridLength(
+            Math.Max(_expandedIssueListWidth, _expandedIssueListMinWidth));
+        IssueListPane.Visibility = Visibility.Visible;
+        IssueListDivider.Visibility = Visibility.Visible;
+        IssueListSplitter.Visibility = Visibility.Visible;
+        CollapsedIssueListRail.Visibility = Visibility.Collapsed;
+        CollapseIssueListButton.Focus(FocusState.Programmatic);
+    }
 
     private void ScheduleFilterRefresh()
     {

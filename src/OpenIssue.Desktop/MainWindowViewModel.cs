@@ -173,7 +173,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public partial FilterChoice? SelectedPriorityFilter { get; set; }
 
     [ObservableProperty]
-    public partial bool ReadyOnly { get; set; }
+    public partial bool DraftOnly { get; set; }
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsDirty))]
@@ -851,7 +851,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         SearchText = string.Empty;
         SelectedStatusFilter = StatusFilterOptions[0];
         SelectedPriorityFilter = PriorityFilterOptions[0];
-        ReadyOnly = false;
+        DraftOnly = false;
 
         var issue = await Task.Run(() => service.Create(string.Empty, string.Empty));
         await RefreshIssuesAsync(preserveCurrentEditor: true);
@@ -891,7 +891,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         return new IssueFilter(
             Status: status is null or "all" ? null : ParseStatus(status),
             Priority: priority is null or "all" ? null : ParsePriority(priority),
-            Draft: ReadyOnly ? false : null);
+            Draft: DraftOnly ? true : null);
     }
 
     private async Task ReconcileIssueOrderAsync(

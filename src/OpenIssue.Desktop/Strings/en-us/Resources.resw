@@ -21,6 +21,21 @@
   <data name="IssueListHeading.Text" xml:space="preserve">
     <value>Issues</value>
   </data>
+  <data name="CollapseIssueListButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Collapse issues list</value>
+  </data>
+  <data name="CollapseIssueListButton.ToolTipService.ToolTip" xml:space="preserve">
+    <value>Collapse issues list</value>
+  </data>
+  <data name="ExpandIssueListButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Show issues list</value>
+  </data>
+  <data name="ExpandIssueListButton.ToolTipService.ToolTip" xml:space="preserve">
+    <value>Show issues list</value>
+  </data>
+  <data name="IssueFiltersExpander.Header" xml:space="preserve">
+    <value>Filters</value>
+  </data>
   <data name="IssueListEmptyTitle.Text" xml:space="preserve">
     <value>No issues to show</value>
   </data>
@@ -69,8 +84,8 @@
   <data name="PriorityLow" xml:space="preserve">
     <value>Low</value>
   </data>
-  <data name="ReadyFilter.Content" xml:space="preserve">
-    <value>Ready only</value>
+  <data name="DraftOnlyFilter.Content" xml:space="preserve">
+    <value>Draft only</value>
   </data>
   <data name="NewIssueButton.Content" xml:space="preserve">
     <value>New issue</value>
@@ -112,7 +127,7 @@
     <value>Loading issues</value>
   </data>
   <data name="IssueListEntryFormat" xml:space="preserve">
-    <value>Issue #{0}: {1}</value>
+    <value>#{0} {1}</value>
   </data>
   <data name="SearchBoxAutomationName" xml:space="preserve">
     <value>Search issues</value>
