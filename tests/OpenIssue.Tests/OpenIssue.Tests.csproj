@@ -4,6 +4,7 @@
     <ProjectReference Include="..\..\src\OpenIssue.Core\OpenIssue.Core.csproj" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <Compile Include="..\..\src\OpenIssue.Desktop\IssueListCollection.cs" Link="Desktop\IssueListCollection.cs" />
+    <Compile Include="..\..\src\OpenIssue.Desktop\ColorThemePreferenceStore.cs" Link="Desktop\ColorThemePreferenceStore.cs" />
   </ItemGroup>
 
   <PropertyGroup>

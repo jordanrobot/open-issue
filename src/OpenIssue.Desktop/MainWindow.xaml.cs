@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -28,6 +29,7 @@ public sealed partial class MainWindow : Window
     private const double CollapsedIssueListColumnWidth = 44;
     private const double CollapsedIssueDetailsColumnWidth = 44;
     private static readonly ResourceLoader Resources = new();
+    private readonly ColorThemePreferenceStore _colorThemePreferenceStore = new();
     private readonly DispatcherQueueTimer _refreshTimer;
     private readonly DispatcherQueueTimer _saveTimer;
     private FileSystemWatcher? _watcher;
@@ -53,6 +55,8 @@ public sealed partial class MainWindow : Window
     private double _expandedIssueDetailsMinWidth;
     private long? _tagInputIssueId;
     private ScrollContentPresenter? _bodyScrollContentPresenter;
+    private ColorThemePreference _colorThemePreference = ColorThemePreference.System;
+    private ResourceDictionary? _activeColorThemeDictionary;
 
     public MainWindowViewModel ViewModel { get; }
 
@@ -137,6 +141,9 @@ public sealed partial class MainWindow : Window
         _launchArguments = launchArguments;
         ViewModel = new MainWindowViewModel();
         InitializeComponent();
+        _colorThemePreference = LoadColorThemePreference();
+        ApplyColorTheme(_colorThemePreference);
+        ColorThemeSelector.SelectedValue = _colorThemePreference.ToString();
         SystemBackdrop = new MicaBackdrop();
         SetInitialWindowSize();
         AppWindow.SetIcon("Assets/AppIcon.ico");
@@ -206,6 +213,97 @@ public sealed partial class MainWindow : Window
                 ViewModel.UpdateTagSuggestions(string.Empty);
             }
         }
+    }
+
+    private ColorThemePreference LoadColorThemePreference()
+    {
+        try
+        {
+            return _colorThemePreferenceStore.Load();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Trace.TraceWarning("Could not load the saved color theme preference: {0}", exception.Message);
+            ViewModel.StatusMessage = Resources.GetString("MessageColorThemePreferenceLoadFailed");
+            return ColorThemePreference.System;
+        }
+    }
+
+    private void ColorThemeSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (ColorThemeSelector.SelectedValue is not string selectedValue ||
+            !Enum.TryParse(selectedValue, out ColorThemePreference selectedPreference) ||
+            !Enum.IsDefined(selectedPreference))
+        {
+            throw new InvalidOperationException("The color theme selector has an invalid selection.");
+        }
+
+        if (selectedPreference == _colorThemePreference)
+        {
+            return;
+        }
+
+        try
+        {
+            _colorThemePreferenceStore.Save(selectedPreference);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Trace.TraceError("Could not save the selected color theme preference: {0}", exception.Message);
+            ViewModel.StatusMessage = Resources.GetString("MessageColorThemePreferenceSaveFailed");
+            ColorThemeSelector.SelectedValue = _colorThemePreference.ToString();
+            return;
+        }
+
+        _colorThemePreference = selectedPreference;
+        ApplyColorTheme(selectedPreference);
+    }
+
+    private void ApplyColorTheme(ColorThemePreference preference)
+    {
+        var root = Content as FrameworkElement
+            ?? throw new InvalidOperationException("The main window content must be a FrameworkElement.");
+        var dictionarySource = preference switch
+        {
+            ColorThemePreference.Dracula => "ms-appx:///Themes/Dracula.xaml",
+            _ => null
+        };
+        var nextDictionary = dictionarySource is null
+            ? null
+            : new ResourceDictionary { Source = new Uri(dictionarySource) };
+        var mergedDictionaries = Application.Current.Resources.MergedDictionaries;
+        var refreshThemeResources = _activeColorThemeDictionary is not null || nextDictionary is not null;
+
+        if (_activeColorThemeDictionary is not null)
+        {
+            mergedDictionaries.Remove(_activeColorThemeDictionary);
+        }
+
+        if (nextDictionary is not null)
+        {
+            mergedDictionaries.Add(nextDictionary);
+        }
+
+        _activeColorThemeDictionary = nextDictionary;
+        if (refreshThemeResources)
+        {
+            // Reapply through a different theme so existing ThemeResource bindings pick up the dictionary swap.
+            root.RequestedTheme = ElementTheme.Light;
+        }
+
+        root.RequestedTheme = preference switch
+        {
+            ColorThemePreference.System => ElementTheme.Default,
+            ColorThemePreference.Light => ElementTheme.Light,
+            _ => ElementTheme.Dark
+        };
+        AppWindow.TitleBar.PreferredTheme = preference switch
+        {
+            ColorThemePreference.System => TitleBarTheme.UseDefaultAppMode,
+            ColorThemePreference.Light => TitleBarTheme.Light,
+            _ => TitleBarTheme.Dark
+        };
+        UpdateBodyInlineHighlights();
     }
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)

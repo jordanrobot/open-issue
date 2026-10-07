@@ -69,7 +69,7 @@ PowerShell helpers are also available from the repository root:
 
 `install.ps1` installs or replaces the global tool using the locally packed package; `uninstall.ps1` removes it.
 
-The CLI and core target portable .NET 10. The Windows desktop app uses WinUI 3 and the Windows App SDK. Build or package it with `src/OpenIssue.Desktop/OpenIssue.Desktop.csproj`; the desktop UI shares the core and storage contract with the CLI.
+The CLI and core target portable .NET 10. The Windows desktop app uses WinUI 3 and the Windows App SDK. Build or package it with `src/OpenIssue.Desktop/OpenIssue.Desktop.csproj`; the desktop UI shares the core and storage contract with the CLI. The desktop UI defaults to System and offers Light, Dark, and Dracula, with the selection saved per user.
 
 The desktop editor autosaves without disabling entry fields or moving keyboard focus. Autosave updates the issue's title in its existing list row without recreating the row. Search and status/priority filters are reapplied when you change a filter or refresh the list, not after each keystroke. Filter and refresh results retain surviving rows and only insert, remove, or move rows whose membership or order changes, avoiding a full-list redraw. The issue pane is a tree: drop between siblings to reorder, onto a different issue to reparent, or into open space to move an issue to the top level. A row's context menu also offers Move to top level. The order is saved with the project. Creating an issue also leaves focus on the control you used.
 

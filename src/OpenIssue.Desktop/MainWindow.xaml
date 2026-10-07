@@ -275,6 +275,43 @@
                         Click="DeleteIssue_Click"
                         IsEnabled="{x:Bind ViewModel.IsDeleteEnabled, Mode=OneWay}"
                         AutomationProperties.AutomationId="DeleteIssueButton" />
+                    <Button
+                        x:Name="AppearanceSettingsButton"
+                        x:Uid="AppearanceSettingsButton"
+                        Width="32"
+                        Height="32"
+                        MinWidth="32"
+                        MinHeight="32"
+                        Padding="0"
+                        AutomationProperties.AutomationId="AppearanceSettingsButton">
+                        <Button.Flyout>
+                            <Flyout>
+                                <Border Padding="12">
+                                    <StackPanel Width="240" Spacing="8">
+                                        <TextBlock
+                                            x:Uid="AppearanceSettingsHeading"
+                                            Style="{StaticResource SubtitleTextBlockStyle}" />
+                                        <ComboBox
+                                            x:Name="ColorThemeSelector"
+                                            x:Uid="ColorThemeSelector"
+                                            Width="240"
+                                            SelectedValuePath="Tag"
+                                            SelectionChanged="ColorThemeSelector_SelectionChanged"
+                                            AutomationProperties.AutomationId="ColorThemeSelector">
+                                            <ComboBoxItem x:Uid="ColorThemeSystemOption" Tag="System" />
+                                            <ComboBoxItem x:Uid="ColorThemeLightOption" Tag="Light" />
+                                            <ComboBoxItem x:Uid="ColorThemeDarkOption" Tag="Dark" />
+                                            <ComboBoxItem x:Uid="ColorThemeDraculaOption" Tag="Dracula" />
+                                        </ComboBox>
+                                    </StackPanel>
+                                </Border>
+                            </Flyout>
+                        </Button.Flyout>
+                        <FontIcon
+                            Glyph="&#xE713;"
+                            FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                            FontSize="14" />
+                    </Button>
                 </StackPanel>
             </Grid>
         </Border>

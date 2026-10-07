@@ -111,6 +111,39 @@
   <data name="DeleteIssueButton.Content" xml:space="preserve">
     <value>Delete</value>
   </data>
+  <data name="AppearanceSettingsButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Appearance settings</value>
+  </data>
+  <data name="AppearanceSettingsButton.ToolTipService.ToolTip" xml:space="preserve">
+    <value>Appearance settings</value>
+  </data>
+  <data name="AppearanceSettingsHeading.Text" xml:space="preserve">
+    <value>Appearance</value>
+  </data>
+  <data name="ColorThemeSelector.Header" xml:space="preserve">
+    <value>Color theme</value>
+  </data>
+  <data name="ColorThemeSelector.AutomationProperties.Name" xml:space="preserve">
+    <value>Color theme</value>
+  </data>
+  <data name="ColorThemeSystemOption.Content" xml:space="preserve">
+    <value>System</value>
+  </data>
+  <data name="ColorThemeLightOption.Content" xml:space="preserve">
+    <value>Light</value>
+  </data>
+  <data name="ColorThemeDarkOption.Content" xml:space="preserve">
+    <value>Dark</value>
+  </data>
+  <data name="ColorThemeDraculaOption.Content" xml:space="preserve">
+    <value>Dracula</value>
+  </data>
+  <data name="MessageColorThemePreferenceLoadFailed" xml:space="preserve">
+    <value>Could not load the saved color theme. Using System.</value>
+  </data>
+  <data name="MessageColorThemePreferenceSaveFailed" xml:space="preserve">
+    <value>Could not save the color theme preference. The previous theme remains active.</value>
+  </data>
   <data name="AddParentIssuesButton.Content" xml:space="preserve">
     <value>Add parent(s)</value>
   </data>

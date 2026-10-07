@@ -6,6 +6,7 @@ var tests = new (string Name, Action Run)[]
 {
     ("project initialization and discovery", ProjectInitialization),
     ("project issue list order persists and validates", IssueListOrderPersistence),
+    ("color theme preference persists and migrates removed theme", ColorThemePreferencePersistence),
     ("nested projects are isolated", NestedProjectIsolation),
     ("dangling project symlinks cannot fall through to a parent project", DanglingProjectLink),
     ("issue creation, listing, search, and Unicode", IssueOperations),
@@ -92,6 +93,39 @@ static void IssueListOrderPersistence()
 
     File.WriteAllText(Path.Combine(project.Root, ".issues", "issue-list-order.json"), "[1,");
     Throws<IssueException>(() => store.Load());
+}
+
+static void ColorThemePreferencePersistence()
+{
+    var directory = Path.Combine(
+        Path.GetTempPath(),
+        "open-issue-theme-tests-" + Guid.NewGuid().ToString("N"));
+    var path = Path.Combine(directory, "color-theme.txt");
+    try
+    {
+        var store = new ColorThemePreferenceStore(path);
+        Equal(ColorThemePreference.System, store.Load());
+
+        foreach (var preference in Enum.GetValues<ColorThemePreference>())
+        {
+            store.Save(preference);
+            Equal(preference, store.Load());
+        }
+
+        File.WriteAllText(path, "MaterialDark");
+        Equal(ColorThemePreference.Dark, store.Load());
+
+        File.WriteAllText(path, "not-a-color-theme");
+        Equal(ColorThemePreference.System, store.Load());
+        Throws<ArgumentOutOfRangeException>(() => store.Save((ColorThemePreference)999));
+    }
+    finally
+    {
+        if (Directory.Exists(directory))
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
 }
 
 static void DanglingProjectLink()
