@@ -69,6 +69,16 @@ public sealed class IssueService(IssueRepository repository)
         });
     }
 
+    /// <summary>Creates a new draft that copies an issue's title, body, priority, and tags.</summary>
+    /// <param name="idOrPrefix">The positive numeric ID of the issue to duplicate.</param>
+    /// <returns>The new draft issue with a newly allocated ID.</returns>
+    /// <remarks>The duplicate does not inherit the source issue's status or relationships.</remarks>
+    public Issue Duplicate(string idOrPrefix)
+    {
+        var source = Resolve(idOrPrefix);
+        return Create(source.Title, source.Body, source.Priority, source.Tags);
+    }
+
     public Issue Edit(
         string idOrPrefix,
         string? title = null,

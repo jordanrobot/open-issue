@@ -154,7 +154,7 @@
     <value>Issues</value>
   </data>
   <data name="IssueListDragDropDescription" xml:space="preserve">
-    <value>Drag between rows to reorder, onto a different issue to reparent, into open space to move to the top level, or into Parents or Children in Issue Details to add a relationship. The row menu also offers Move to top level.</value>
+    <value>Drag between rows to reorder, onto a different issue to reparent, into open space to move to the top level, or into Parents or Children in Issue Details to add a relationship. The row menu offers Move to top level, Duplicate issue, Edit in external editor, Reveal in File Explorer, and Delete issue.</value>
   </data>
   <data name="IssueListDragStartFormat" xml:space="preserve">
     <value>Dragging {0}. Drop on an issue to reparent, between rows to reorder, into open space to remove its parent links, or into Parents or Children to add a relationship.</value>
@@ -501,6 +501,15 @@
   <data name="IssueListMoveToRootContextMenuItem.Text" xml:space="preserve">
     <value>Move to top level</value>
   </data>
+  <data name="IssueListDuplicateContextMenuItem.Text" xml:space="preserve">
+    <value>Duplicate issue</value>
+  </data>
+  <data name="IssueListExternalEditContextMenuItem.Text" xml:space="preserve">
+    <value>Edit in external editor</value>
+  </data>
+  <data name="IssueListRevealInExplorerContextMenuItem.Text" xml:space="preserve">
+    <value>Reveal in File Explorer</value>
+  </data>
   <data name="MessageIssueListOrderSaved" xml:space="preserve">
     <value>Issue order saved.</value>
   </data>
@@ -527,6 +536,15 @@
   </data>
   <data name="IssueListDeleteContextMenuItem.Text" xml:space="preserve">
     <value>Delete Issue</value>
+  </data>
+  <data name="MessageCannotDuplicateIssueTitle" xml:space="preserve">
+    <value>Cannot duplicate issue</value>
+  </data>
+  <data name="MessageCannotOpenIssueExternallyTitle" xml:space="preserve">
+    <value>Cannot open issue in an external editor</value>
+  </data>
+  <data name="MessageCannotRevealIssueTitle" xml:space="preserve">
+    <value>Cannot reveal issue in File Explorer</value>
   </data>
   <data name="ButtonOk" xml:space="preserve">
     <value>OK</value>

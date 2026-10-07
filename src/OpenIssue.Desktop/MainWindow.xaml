@@ -177,6 +177,19 @@
                                                     AutomationProperties.AutomationId="{x:Bind MoveToRootAutomationId, Mode=OneTime}" />
                                                 <MenuFlyoutSeparator />
                                                 <MenuFlyoutItem
+                                                    x:Uid="IssueListDuplicateContextMenuItem"
+                                                    Click="DuplicateIssueContextMenuItem_Click"
+                                                    AutomationProperties.AutomationId="IssueListDuplicateContextMenuItem" />
+                                                <MenuFlyoutItem
+                                                    x:Uid="IssueListExternalEditContextMenuItem"
+                                                    Click="EditIssueExternallyContextMenuItem_Click"
+                                                    AutomationProperties.AutomationId="IssueListExternalEditContextMenuItem" />
+                                                <MenuFlyoutItem
+                                                    x:Uid="IssueListRevealInExplorerContextMenuItem"
+                                                    Click="RevealIssueInExplorerContextMenuItem_Click"
+                                                    AutomationProperties.AutomationId="IssueListRevealInExplorerContextMenuItem" />
+                                                <MenuFlyoutSeparator />
+                                                <MenuFlyoutItem
                                                     x:Uid="IssueListDeleteContextMenuItem"
                                                     Click="DeleteIssueContextMenuItem_Click"
                                                     AutomationProperties.AutomationId="IssueListDeleteContextMenuItem" />

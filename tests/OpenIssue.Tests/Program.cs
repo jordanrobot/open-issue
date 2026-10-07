@@ -12,6 +12,7 @@ var tests = new (string Name, Action Run)[]
     ("issue creation, listing, search, and Unicode", IssueOperations),
     ("issue-body references and dependencies are parsed", IssueBodyLinks),
     ("issue-body tags are parsed and filterable", IssueBodyTags),
+    ("issues can be duplicated as new drafts", IssueDuplication),
     ("Markdown editor formatting and indentation edits", MarkdownTextEditing),
     ("parent and child links can be added", IssueRelationshipLinks),
     ("parent and child links can be removed", IssueRelationshipLinkRemoval),
@@ -174,6 +175,43 @@ static void IssueOperations()
     Equal(child.Id, service.Show(issue.Id.ToString()).Children.Single());
     service.Edit(child.Id.ToString(), parents: [issue.Id]);
     Equal(issue.Id, service.Show(child.Id.ToString()).Parents.Single());
+}
+
+static void IssueDuplication()
+{
+    using var project = new TemporaryProject();
+    var service = project.Service;
+    var parent = service.Create("Parent", "");
+    var source = service.Create("Original", "Copied body", IssuePriority.High, ["Docs"]);
+    var child = service.Create("Child", "");
+    var related = service.Create("Related", "");
+    var blocker = service.Create("Blocker", "");
+
+    service.AddParents(source.Id.ToString(), [parent.Id]);
+    service.AddChildren(source.Id.ToString(), [child.Id]);
+    service.Edit(
+        source.Id.ToString(),
+        related: [related.Id],
+        blocks: [blocker.Id],
+        status: IssueStatus.Closed,
+        draft: false);
+    var sourceSnapshot = service.Show(source.Id.ToString());
+
+    var duplicate = service.Duplicate(source.Id.ToString());
+
+    True(duplicate.Id != sourceSnapshot.Id, "duplicate reused the source issue ID");
+    Equal(sourceSnapshot.Title, duplicate.Title);
+    Equal(sourceSnapshot.Body, duplicate.Body);
+    Equal(sourceSnapshot.Priority, duplicate.Priority);
+    Equal(string.Join(',', sourceSnapshot.Tags), string.Join(',', duplicate.Tags));
+    Equal(IssueStatus.Open, duplicate.Status);
+    True(duplicate.Draft, "duplicate was not created as a draft");
+    Equal(0, duplicate.Parents.Count);
+    Equal(0, duplicate.Children.Count);
+    Equal(0, duplicate.Related.Count);
+    Equal(0, duplicate.Blocks.Count);
+    True(File.Exists(service.Repository.GetIssuePath(duplicate.Id)), "duplicate issue file was not created");
+    Throws<IssueException>(() => service.Duplicate("999"));
 }
 
 static void IssueBodyLinks()

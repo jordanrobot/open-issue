@@ -279,6 +279,20 @@ public sealed partial class MainWindowViewModel : ObservableObject
         return issuesDirectory;
     }
 
+    /// <summary>Gets the validated Markdown file path for an existing issue.</summary>
+    /// <param name="issueId">The issue's numeric ID.</param>
+    /// <returns>The issue file's full path.</returns>
+    public Task<string> GetIssueFilePathAsync(long issueId)
+    {
+        var repository = _service?.Repository
+            ?? throw new IssueException("The issue project has not been initialized.");
+        return Task.Run(() =>
+        {
+            var issue = repository.Read(issueId);
+            return repository.GetIssuePath(issue.Id);
+        });
+    }
+
     /// <summary>Updates body autocomplete suggestions for the numeric prefix after a typed <c>#</c>.</summary>
     /// <param name="idPrefix">Digits typed after the issue-reference marker.</param>
     public void UpdateIssueReferenceSuggestions(string idPrefix)
@@ -1058,6 +1072,17 @@ public sealed partial class MainWindowViewModel : ObservableObject
         var issue = await Task.Run(() => service.Create(string.Empty, string.Empty));
         await RefreshIssuesAsync(preserveCurrentEditor: true);
         var created = _availableIssues.FirstOrDefault(candidate => candidate.Id == issue.Id) ?? issue;
+        LoadIssue(created);
+    }
+
+    [RelayCommand]
+    private async Task DuplicateIssueAsync(long issueId)
+    {
+        var service = _service ?? throw new IssueException("The issue project has not been initialized.");
+        var duplicate = await Task.Run(() =>
+            service.Duplicate(issueId.ToString(CultureInfo.InvariantCulture)));
+        await RefreshIssuesAsync(preserveCurrentEditor: true);
+        var created = _availableIssues.FirstOrDefault(candidate => candidate.Id == duplicate.Id) ?? duplicate;
         LoadIssue(created);
     }
 

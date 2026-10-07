@@ -1012,6 +1012,63 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private async void DuplicateIssueContextMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: IssueListItem row } ||
+            !await ConfirmLeaveCurrentAsync())
+        {
+            return;
+        }
+
+        try
+        {
+            await ViewModel.DuplicateIssueCommand.ExecuteAsync(row.Id);
+        }
+        catch (Exception exception) when (exception is IssueException or IOException or UnauthorizedAccessException)
+        {
+            await ShowMessageAsync(GetString("MessageCannotDuplicateIssueTitle"), exception.Message);
+        }
+    }
+
+    private async void EditIssueExternallyContextMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: IssueListItem row } ||
+            !await ConfirmLeaveCurrentAsync())
+        {
+            return;
+        }
+
+        try
+        {
+            var issuePath = await ViewModel.GetIssueFilePathAsync(row.Id);
+            Process.Start(new ProcessStartInfo(issuePath) { UseShellExecute = true });
+        }
+        catch (Exception exception) when (exception is IssueException or IOException or UnauthorizedAccessException or Win32Exception)
+        {
+            await ShowMessageAsync(GetString("MessageCannotOpenIssueExternallyTitle"), exception.Message);
+        }
+    }
+
+    private async void RevealIssueInExplorerContextMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: IssueListItem row })
+        {
+            return;
+        }
+
+        try
+        {
+            var issuePath = await ViewModel.GetIssueFilePathAsync(row.Id);
+            var startInfo = new ProcessStartInfo("explorer.exe") { UseShellExecute = true };
+            startInfo.ArgumentList.Add($"/select,{issuePath}");
+            Process.Start(startInfo);
+        }
+        catch (Exception exception) when (exception is IssueException or IOException or UnauthorizedAccessException or Win32Exception)
+        {
+            await ShowMessageAsync(GetString("MessageCannotRevealIssueTitle"), exception.Message);
+        }
+    }
+
     private async void AddParentIssuesButton_Click(object sender, RoutedEventArgs e) =>
         await AddIssueRelationshipsAsync(addingParents: true);
 
