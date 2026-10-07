@@ -13,6 +13,8 @@ public static class ProjectLocator
 
     public const string DataDirectoryName = ".issues";
     public const string IssuesDirectoryName = "issues";
+    public const string OpenIssuesDirectoryName = "open";
+    public const string ClosedIssuesDirectoryName = "closed";
     public const string ConfigFileName = "config.json";
     public const int CurrentFormatVersion = 1;
 
@@ -62,7 +64,8 @@ public static class ProjectLocator
         Directory.CreateDirectory(temporaryPath);
         try
         {
-            Directory.CreateDirectory(Path.Combine(temporaryPath, IssuesDirectoryName));
+            Directory.CreateDirectory(Path.Combine(temporaryPath, OpenIssuesDirectoryName));
+            Directory.CreateDirectory(Path.Combine(temporaryPath, ClosedIssuesDirectoryName));
             var config = JsonSerializer.Serialize(new ProjectConfig(CurrentFormatVersion),
                 new JsonSerializerOptions(JsonOptions) { WriteIndented = true });
             File.WriteAllText(Path.Combine(temporaryPath, ConfigFileName), config + Environment.NewLine);
@@ -106,9 +109,24 @@ public static class ProjectLocator
     }
 
     public static string GetIssuesDirectory(string projectRoot)
+        => GetOpenIssuesDirectory(projectRoot);
+
+    /// <summary>Gets the validated directory containing open issue files.</summary>
+    /// <param name="projectRoot">The root of the initialized project.</param>
+    /// <returns>The full path to the open issue directory.</returns>
+    public static string GetOpenIssuesDirectory(string projectRoot) =>
+        GetIssueDirectory(projectRoot, OpenIssuesDirectoryName);
+
+    /// <summary>Gets the validated directory containing closed issue files.</summary>
+    /// <param name="projectRoot">The root of the initialized project.</param>
+    /// <returns>The full path to the closed issue directory.</returns>
+    public static string GetClosedIssuesDirectory(string projectRoot) =>
+        GetIssueDirectory(projectRoot, ClosedIssuesDirectoryName);
+
+    private static string GetIssueDirectory(string projectRoot, string directoryName)
     {
         var dataPath = Path.Combine(Path.GetFullPath(projectRoot), DataDirectoryName);
-        var issuesPath = Path.Combine(dataPath, IssuesDirectoryName);
+        var issuesPath = Path.Combine(dataPath, directoryName);
         RejectLink(dataPath);
         RejectLink(issuesPath);
         return issuesPath;

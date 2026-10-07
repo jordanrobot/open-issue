@@ -5,6 +5,8 @@ using System.Collections.Specialized;
 var tests = new (string Name, Action Run)[]
 {
     ("project initialization and discovery", ProjectInitialization),
+    ("issue status follows the open and closed directories", IssueStatusFolders),
+    ("duplicate issue locations are diagnosed", DuplicateIssueLocations),
     ("project issue list order persists and validates", IssueListOrderPersistence),
     ("color theme preference persists and migrates removed theme", ColorThemePreferencePersistence),
     ("nested projects are isolated", NestedProjectIsolation),
@@ -75,9 +77,73 @@ static void ProjectInitialization()
     var config = File.ReadAllText(Path.Combine(project.Root, ".issues", "config.json"));
     True(config.Contains("\"formatVersion\": 1", StringComparison.Ordinal), "configuration formatVersion was not camel-cased");
     Equal("1", File.ReadAllText(Path.Combine(project.Root, ".issues", "next-id")).Trim());
+    True(Directory.Exists(Path.Combine(project.Root, ".issues", "open")), "open issue directory was not initialized");
+    True(Directory.Exists(Path.Combine(project.Root, ".issues", "closed")), "closed issue directory was not initialized");
+    True(!Directory.Exists(Path.Combine(project.Root, ".issues", "issues")), "legacy issue directory was initialized");
     File.WriteAllText(Path.Combine(project.Root, ".issues", "config.json"), "{\"formatVersion\":2}");
     Throws<IssueException>(() => ProjectLocator.Find(project.Root));
     True(!Directory.Exists(Path.Combine(project.Root, ".git")), "test project unexpectedly has Git metadata");
+}
+
+static void IssueStatusFolders()
+{
+    using var project = new TemporaryProject();
+    var service = project.Service;
+    var repository = service.Repository;
+    var issue = service.Create("Folder status", "Draft");
+    var openPath = Path.Combine(project.Root, ".issues", "open", $"{issue.Id}.md");
+    var closedPath = Path.Combine(project.Root, ".issues", "closed", $"{issue.Id}.md");
+
+    Equal(openPath, repository.GetIssuePath(issue.Id));
+    True(File.Exists(openPath), "new issue was not stored under open");
+    True(!File.ReadAllText(openPath).Contains("status: open", StringComparison.Ordinal),
+        "open status was duplicated in issue metadata");
+
+    var closed = service.SetStatus(issue.Id.ToString(), IssueStatus.Closed);
+    Equal(IssueStatus.Closed, closed.Status);
+    Equal(closedPath, repository.GetIssuePath(issue.Id));
+    True(!File.Exists(openPath), "closed issue remained under open");
+    True(File.Exists(closedPath), "closed issue was not moved under closed");
+    True(!File.ReadAllText(closedPath).Contains("status: closed", StringComparison.Ordinal),
+        "closed status was duplicated in issue metadata");
+
+    File.WriteAllText(Path.Combine(project.Root, ".issues", "next-id"), "1");
+    Equal(2L, service.Create("Next after closed issue", "Draft").Id);
+
+    var declined = service.SetStatus(issue.Id.ToString(), IssueStatus.Declined);
+    Equal(IssueStatus.Declined, declined.Status);
+    True(File.ReadAllText(closedPath).Contains("status: declined", StringComparison.Ordinal),
+        "declined status subtype was not retained");
+
+    var reopened = service.SetStatus(issue.Id.ToString(), IssueStatus.Open);
+    Equal(IssueStatus.Open, reopened.Status);
+    Equal(openPath, repository.GetIssuePath(issue.Id));
+    True(File.Exists(openPath), "reopened issue was not moved under open");
+    True(!File.Exists(closedPath), "reopened issue remained under closed");
+
+    var declinedMetadata = File.ReadAllText(openPath)
+        .Replace("schema: 4\n", "schema: 4\nstatus: declined\n", StringComparison.Ordinal);
+    File.Move(openPath, closedPath);
+    Equal(IssueStatus.Closed, repository.Read(issue.Id).Status);
+    File.WriteAllText(closedPath, declinedMetadata);
+    Equal(IssueStatus.Declined, repository.Read(issue.Id).Status);
+    File.Move(closedPath, openPath);
+    Equal(IssueStatus.Open, repository.Read(issue.Id).Status);
+}
+
+static void DuplicateIssueLocations()
+{
+    using var project = new TemporaryProject();
+    var service = project.Service;
+    var issue = service.Create("Duplicated issue", "Draft");
+    var openPath = service.Repository.GetIssuePath(issue.Id);
+    var closedPath = Path.Combine(project.Root, ".issues", "closed", $"{issue.Id}.md");
+    File.Copy(openPath, closedPath);
+
+    var result = service.List();
+    Equal(0, result.Issues.Count);
+    Equal(2, result.Diagnostics.Count);
+    Throws<IssueException>(() => service.Show(issue.Id.ToString()));
 }
 
 static void IssueListOrderPersistence()
@@ -363,7 +429,7 @@ static void MarkdownTextEditing()
             indentedBlock.Length,
             out var outdentEdit),
         "an indented selection did not provide an outdent edit");
-    Equal("first\r\nsecond\r\nthird", ApplyTextEdit(indentedBlock, outdentEdit));
+    Equal("  first\r\nsecond\r\nthird", ApplyTextEdit(indentedBlock, outdentEdit));
     Equal(outdentEdit.Replacement.Length, outdentEdit.SelectionLength);
     True(!MarkdownTextEditor.TryCreateOutdentEdit("unindented", 0, 0, out _),
         "an unindented line provided an outdent edit");
@@ -373,8 +439,14 @@ static void MarkdownTextEditing()
         linesToIndent,
         0,
         linesToIndent.Length);
-    Equal("\tfirst\r\n\tsecond", ApplyTextEdit(linesToIndent, indentEdit));
+    Equal("  first\r\n  second", ApplyTextEdit(linesToIndent, indentEdit));
     Equal(indentEdit.Replacement.Length, indentEdit.SelectionLength);
+
+    const string textToIndentAtCaret = "let value = 1;";
+    var tabEdit = MarkdownTextEditor.CreateTabEdit(textToIndentAtCaret, 3);
+    Equal("  ", tabEdit.Replacement);
+    Equal("let   value = 1;", ApplyTextEdit(textToIndentAtCaret, tabEdit));
+    Equal(2, tabEdit.CaretOffset);
 
     var boldEdit = MarkdownTextEditor.CreateInlineFormatEdit(
         "hello world",
@@ -559,7 +631,8 @@ static void DraftByDefault()
     var issue = service.Create("Draft issue", "# Acceptance criteria\n\nComplete review\n");
     True(issue.Draft, "new issues should be drafts until explicitly marked ready");
     var issueFile = File.ReadAllText(service.Repository.GetIssuePath(issue.Id));
-    True(issueFile.Contains("schema: 3", StringComparison.Ordinal), "new issue did not use the current schema");
+    True(issueFile.Contains("schema: 4", StringComparison.Ordinal), "new issue did not use the current schema");
+    True(!issueFile.Contains("status:", StringComparison.Ordinal), "new issue persisted status metadata");
     True(issueFile.Contains("draft: true", StringComparison.Ordinal), "new issue was not persisted as a draft");
     True(!issueFile.Contains("ready:", StringComparison.Ordinal), "new issue still uses the legacy ready field");
 }
@@ -784,7 +857,8 @@ static void Preservation()
     var result = File.ReadAllText(repository.GetIssuePath(id));
     True(result.Contains("nested: retained", StringComparison.Ordinal), "unknown frontmatter was lost");
     True(result.Contains("# Body\r\n\r\ncafé\r\n", StringComparison.Ordinal), "body or CRLF line endings changed");
-    True(result.Contains("schema: 3", StringComparison.Ordinal), "legacy issue was not upgraded to schema 3");
+    True(result.Contains("schema: 4", StringComparison.Ordinal), "legacy issue was not upgraded to schema 4");
+    True(!result.Contains("status: open", StringComparison.Ordinal), "open status metadata was not removed on write");
     True(result.Contains("draft: true", StringComparison.Ordinal), "legacy readiness was not inverted on write");
     True(!result.Contains("ready:", StringComparison.Ordinal), "legacy ready field was not removed on write");
     Equal("Updated", updated.Title);

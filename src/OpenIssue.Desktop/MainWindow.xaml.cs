@@ -403,10 +403,11 @@ public sealed partial class MainWindow : Window
         return projectRoot ?? throw new IssueException(GetString("MessageConfigNotInProject"));
     }
 
-    private void SetWatcher(string issuesPath)
+    private void SetWatcher(string dataDirectory)
     {
-        _watcher = new FileSystemWatcher(issuesPath, "*.md")
+        _watcher = new FileSystemWatcher(dataDirectory, "*.md")
         {
+            IncludeSubdirectories = true,
             NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
             EnableRaisingEvents = true
         };
@@ -1937,9 +1938,9 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var selectionStart = textBox.SelectionStart;
-        textBox.SelectedText = "\t";
-        textBox.SelectionStart = selectionStart + 1;
+        ApplyMarkdownEdit(MarkdownTextEditor.CreateTabEdit(
+            textBox.Text,
+            textBox.SelectionStart));
         e.Handled = true;
     }
 

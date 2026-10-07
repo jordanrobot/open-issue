@@ -1,6 +1,6 @@
 ---
 name: implement-issue
-description: 'Implements a user-selected repository issue from `.issues/issues/`, validates the code changes, updates Markdown task checkboxes, and leaves the issue open for user integration testing and manual closure. Use when asked to implement, fix, or work on an issue by number such as `implement #3` or by providing its issue Markdown file.'
+description: 'Implements a user-selected repository issue from `.issues/open/`, validates the code changes, updates Markdown task checkboxes, and leaves the issue open for user integration testing and manual closure. Use when asked to implement, fix, or work on an issue by number such as `implement #3` or by providing its issue Markdown file.'
 ---
 
 # Implement a Repository Issue
@@ -10,13 +10,13 @@ Use the selected issue document as the task specification: implement its require
 ## When to Use This Skill
 
 - The user asks to implement, fix, or work on an issue by ID, such as `implement #3`.
-- The user provides a Markdown issue file from `.issues/issues/`.
+- The user provides a Markdown issue file from `.issues/open/`.
 
 ## Workflow
 
 ### 1. Resolve and read the issue
 
-- Resolve the repository root, then look in `.issues/issues/`.
+- Resolve the repository root, then look in `.issues/open/`.
 - If the user supplied an exact issue-file path or tagged file, use it and verify that it belongs to this issue directory.
 - For a numeric ID `N`, accept only `N.md` or filenames beginning with `N-` or `N_` and ending in `.md`. Match the whole numeric ID: `#2` must not select `22-anything.md`.
 - Read the candidate's frontmatter and confirm its `id` is `N` when an ID is present. If no candidate exists, candidates conflict with the requested ID, or multiple candidates remain ambiguous, ask the user which file to use instead of guessing.

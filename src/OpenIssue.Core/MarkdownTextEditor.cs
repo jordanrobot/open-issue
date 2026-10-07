@@ -28,6 +28,7 @@ public readonly record struct MarkdownTextEdit(
 /// <summary>Creates Markdown-aware text edits for the issue-body editor.</summary>
 public static class MarkdownTextEditor
 {
+    private const string TabIndentText = "  ";
     private static readonly Regex ListItemPattern = new(
         @"^(?<indent>[ \t]*)(?<marker>[-+*]|[0-9]{1,9}[.)])(?<spacing>[ \t]+)(?<task>\[(?<check>[ xX])\](?=[ \t]|$)(?<taskSpacing>[ \t]*))?(?<content>.*)$",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
@@ -140,11 +141,21 @@ public static class MarkdownTextEditor
             (line, lineNumber) => TransformListLine(line, lineNumber, kind));
     }
 
+    /// <summary>Creates an edit that expands the Tab key to two spaces at the caret.</summary>
+    /// <param name="text">The current Markdown text.</param>
+    /// <param name="caretIndex">The current caret position.</param>
+    /// <returns>An edit that places the caret after the inserted spaces.</returns>
+    public static MarkdownTextEdit CreateTabEdit(string text, int caretIndex)
+    {
+        ValidateSelection(text, caretIndex, 0);
+        return new MarkdownTextEdit(caretIndex, 0, TabIndentText, TabIndentText.Length);
+    }
+
     /// <summary>Creates an edit that indents every selected line, or the current line when nothing is selected.</summary>
     /// <param name="text">The current Markdown text.</param>
     /// <param name="selectionStart">The selection start.</param>
     /// <param name="selectionLength">The selection length.</param>
-    /// <returns>An edit that inserts one tab at the start of each affected line.</returns>
+    /// <returns>An edit that inserts two spaces at the start of each affected line.</returns>
     public static MarkdownTextEdit CreateIndentEdit(
         string text,
         int selectionStart,
@@ -155,7 +166,7 @@ public static class MarkdownTextEditor
             text,
             selectionStart,
             selectionLength,
-            static (line, _) => "\t" + line);
+            static (line, _) => TabIndentText + line);
     }
 
     /// <summary>Creates an edit that removes one indentation level from selected lines or the current line.</summary>
@@ -375,7 +386,7 @@ public static class MarkdownTextEditor
             return line[1..];
         }
 
-        var spaces = CountLeadingSpaces(line, maximumCount: 4);
+        var spaces = CountLeadingSpaces(line, maximumCount: TabIndentText.Length);
         return line[spaces..];
     }
 

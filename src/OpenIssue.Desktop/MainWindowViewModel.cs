@@ -263,11 +263,13 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     public async Task<string> InitializeProjectAsync(string root)
     {
-        var issuesDirectory = await Task.Run(() =>
+        var dataDirectory = await Task.Run(() =>
         {
-            var path = ProjectLocator.GetIssuesDirectory(root);
-            Directory.CreateDirectory(path);
-            return path;
+            var openDirectory = ProjectLocator.GetOpenIssuesDirectory(root);
+            var closedDirectory = ProjectLocator.GetClosedIssuesDirectory(root);
+            Directory.CreateDirectory(openDirectory);
+            Directory.CreateDirectory(closedDirectory);
+            return Path.Combine(Path.GetFullPath(root), ProjectLocator.DataDirectoryName);
         });
 
         var orderStore = new IssueListOrderStore(root);
@@ -276,7 +278,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _issueOrder = issueOrder;
         _service = new IssueService(new IssueRepository(root));
         ProjectRoot = root;
-        return issuesDirectory;
+        return dataDirectory;
     }
 
     /// <summary>Gets the validated Markdown file path for an existing issue.</summary>

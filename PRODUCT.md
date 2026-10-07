@@ -33,7 +33,7 @@ Repository-documented; not separately user-confirmed:
 
 - The core and CLI target .NET 10; the desktop application uses WinUI 3 and the Windows App SDK.
 - The CLI supports issue creation, listing, search, display, editing, readiness, deletion, and next-issue selection. Read commands can return JSON for scripts and agents.
-- Issues are stored as UTF-8 Markdown under `.issues/issues/`. Numeric IDs are allocated per project and are not reused after deletion. The format supports status, draft/readiness, priority, tags, and parent, child, related, and blocking relationships.
+- Issues are stored as UTF-8 Markdown under `.issues/open/` or `.issues/closed/`; directory location determines open/closed status, with `status: declined` retained as a subtype in `closed/`. Numeric IDs are allocated per project and are not reused after deletion. The format supports draft/readiness, priority, tags, and parent, child, related, and blocking relationships.
 - Commands use the nearest initialized project and do not accept an arbitrary issue-store path override. Invalid files are reported as diagnostics without hiding other valid issues; writes use revisions to detect conflicts, and unsafe IDs and symlinks/reparse points are rejected.
 - The desktop UI is Windows-specific. The portable core and CLI do not use WinUI APIs.
 - The README documents no account, network service, database, or Git repository requirement. Windows desktop usage has additional Windows App SDK/runtime requirements.

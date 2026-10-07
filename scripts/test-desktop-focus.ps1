@@ -60,7 +60,7 @@ function Assert-ListRowsUnchanged {
     }
 }
 
-$issuesPath = Join-Path $TestProjectRoot '.issues\issues'
+$issuesPath = Join-Path $TestProjectRoot '.issues\open'
 $existingFiles = @(Get-ChildItem -LiteralPath $issuesPath -Filter '*.md' | Select-Object -ExpandProperty FullName)
 Invoke-Ui focus NewIssueButton
 Invoke-Ui invoke NewIssueButton

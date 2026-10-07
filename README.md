@@ -1,6 +1,6 @@
 # Open Issue
 
-Open Issue is a local-first issue and specification manager. Issues are UTF-8 Markdown files stored under `.issues/`; no Git repository, account, network service, or database is required.
+Open Issue is a local-first issue and specification manager. Issues are UTF-8 Markdown files stored under `.issues/open/` and `.issues/closed/`; no Git repository, account, network service, or database is required.
 
 ## Install
 
@@ -43,6 +43,8 @@ issue next --json
 ```
 
 The command discovers the nearest initialized `.issues/config.json` walking upward from the current directory, so it works anywhere inside that project. It operates only on that project’s `.issues` data. A nested initialized project takes precedence inside its own directory; a command cannot target another project with a path override.
+
+Open and closed issues live in separate directories, and changing status moves the issue file between them. Existing issues in `.issues/issues/` are not migrated automatically; move them manually into the appropriate directory.
 
 Interactive `new` opens the configured editor when no body is supplied. In redirected/scripted use, provide `--title` and `--body-file`; use `--body-file -` to read Markdown from stdin. `issue --help` and `issue <command> --help` show command options.
 

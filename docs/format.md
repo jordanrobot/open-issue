@@ -8,23 +8,24 @@
 .issues/
   config.json
   next-id
-  issues/
+  open/
+  closed/
 ```
 
 `config.json` contains the `formatVersion` integer. Version `1` is supported; unknown versions fail without rewriting data. Initialization refuses to overwrite an existing `.issues` path.
 
-Issue commands locate the closest `.issues/config.json` walking upward from the current working directory. This makes the command available from any project subfolder. It always operates on the issue store rooted at that marker; it has no option to point an existing project command at another issue store. If another project is initialized inside a subfolder, commands run there use the nested project and cannot read or mutate its parent project’s issue store. Legacy `.free-issue` directories are not discovered or automatically migrated; they are left untouched.
+Issue commands locate the closest `.issues/config.json` walking upward from the current working directory. This makes the command available from any project subfolder. It always operates on the issue store rooted at that marker; it has no option to point an existing project command at another issue store. If another project is initialized inside a subfolder, commands run there use the nested project and cannot read or mutate its parent project’s issue store. Legacy `.free-issue` directories are not discovered or automatically migrated; they are left untouched. Files in the former `.issues/issues/` directory are also not migrated automatically; move them manually into `open/` or `closed/`.
 
 ## Issue Markdown
 
-Each issue is stored as `.issues/issues/<id>.md`, UTF-8 Markdown with a YAML frontmatter mapping between `---` lines, followed by the Markdown body. IDs are positive, monotonically allocated integers, immutable within the project, and independent of titles. The `next-id` high-water mark and a cross-process allocation lock prevent ID reuse after deletion and ensure creating an issue does not overwrite a previous issue.
+Each issue is stored as `.issues/open/<id>.md` or `.issues/closed/<id>.md`, UTF-8 Markdown with a YAML frontmatter mapping between `---` lines, followed by the Markdown body. The directory determines whether an issue is open or closed. Declined issues live in `closed/` and retain `status: declined` metadata to distinguish them from closed issues. IDs are positive, monotonically allocated integers, immutable within the project, and independent of titles. The `next-id` high-water mark and a cross-process allocation lock prevent ID reuse after deletion and ensure creating an issue does not overwrite a previous issue.
 
 | Key | Type | Rules |
 | --- | --- | --- |
-| `schema` | integer | New files use `3`; schema `2` files remain readable. |
+| `schema` | integer | New files use `4`; schemas `2` and `3` remain readable. |
 | `id` | integer | Positive numeric ID and equal to the filename. |
 | `title` | string | Single line; may be empty only while the issue is a draft. |
-| `status` | string | `open`, `closed`, or `declined`. |
+| `status` | string | Optional; folder location determines open/closed. New files include `declined` only to distinguish declined issues under `closed/`; legacy `open` and `closed` values are ignored. |
 | `draft` | boolean | Required; newly created issues default to true. |
 | `priority` | string | `low`, `normal`, `high`, or `urgent`. |
 | `tags` | list of strings | Defaults to empty; entries must be nonempty and unique ignoring case. |
@@ -42,10 +43,9 @@ Example:
 
 ```yaml
 ---
-schema: 3
+schema: 4
 id: 1
 title: Document the public API
-status: open
 draft: true
 priority: normal
 tags:
@@ -61,7 +61,7 @@ blocks: []
 Document the public API for consumers.
 ```
 
-New issues start as drafts (`draft: true`) with an empty title and body by default. A draft may keep an empty title while it is being authored; a title is required before marking it ready. Schema 2 files with `ready` are read with the inverse value and upgraded to schema 3 on their next write. In the desktop editor, unchecking Draft marks an issue ready. Issue bodies are freeform Markdown; no headings, sections, or body content are required. Readiness is independent of status; `next` selects only open, ready, unblocked issues. Readiness authorizes selection by `next`, not autonomous implementation.
+New issues start as drafts (`draft: true`) with an empty title and body by default. A draft may keep an empty title while it is being authored; a title is required before marking it ready. Schema 2 files with `ready` are read with the inverse value, and schemas 2 and 3 are upgraded to schema 4 on their next write. In the desktop editor, unchecking Draft marks an issue ready. Issue bodies are freeform Markdown; no headings, sections, or body content are required. Readiness is independent of status; `next` selects only open, ready, unblocked issues. Readiness authorizes selection by `next`, not autonomous implementation.
 
 Inline body tags use `#tag`, where the tag starts with a letter or underscore and may continue with letters, digits, underscores, or hyphens. A numeric token such as `#123` is an issue reference, not a tag. Inline tags remain in the Markdown body and are combined with frontmatter `tags` for display, search, and filtering; they are not copied into frontmatter.
 
@@ -71,7 +71,7 @@ New issues record the creating operating-system username in `created_by`; existi
 
 Files are never rewritten on read. Malformed issue files are reported individually; other valid issues remain available. IDs are validated before path construction. Symlinks/reparse points for the project data directory, issue directory, and issue files are rejected. Markdown is not executed or treated as trusted HTML.
 
-Writes use a temporary file in the issue directory, flush it, and move it into place. Per-issue exclusive locks coordinate writers; issue creation also takes a project-wide allocation lock. An update checks the caller’s SHA-256 revision before preparing and immediately before replacing the file, reporting conflicts instead of overwriting manual/concurrent edits. Manual edits should preserve YAML validity, the filename/ID match, allowed values, and numeric references.
+Writes use a temporary file in the issue directory, flush it, and move it into place. Per-issue exclusive locks coordinate writers; issue creation also takes a project-wide allocation lock. An update checks the caller’s SHA-256 revision before preparing and immediately before replacing the file, reporting conflicts instead of overwriting manual/concurrent edits. Changing an issue to closed or declined moves it to `closed/`; reopening it moves it to `open/`. Manual edits should preserve YAML validity, the filename/ID match, allowed values, and numeric references.
 
 Deleting an issue is permanent and is rejected while another issue references its ID; remove those links first. Before removing the file, deletion advances the `next-id` high-water mark past the deleted numeric ID, including IDs from imported issue files, so that ID is never allocated again. This format uses numeric issue IDs only; it does not define GUID issue IDs.
 

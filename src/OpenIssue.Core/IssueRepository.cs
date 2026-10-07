@@ -9,44 +9,68 @@ namespace OpenIssue.Core;
 public sealed class IssueRepository(string projectRoot)
 {
     private static readonly UTF8Encoding Utf8 = new(false, true);
-    private readonly string _issuesDirectory = ProjectLocator.GetIssuesDirectory(projectRoot);
+    private readonly string _openIssuesDirectory = ProjectLocator.GetOpenIssuesDirectory(projectRoot);
+    private readonly string _closedIssuesDirectory = ProjectLocator.GetClosedIssuesDirectory(projectRoot);
 
     public string ProjectRoot { get; } = Path.GetFullPath(projectRoot);
 
     public IssueListResult List()
     {
-        var issues = new List<Issue>();
+        var issuesById = new Dictionary<long, (Issue Issue, string Path)>();
+        var ambiguousIds = new HashSet<long>();
         var diagnostics = new List<IssueDiagnostic>();
-        EnsureSafeDirectory();
-        if (!Directory.Exists(_issuesDirectory))
+        EnsureSafeDirectories();
+        foreach (var directory in GetIssueDirectories())
         {
-            return new IssueListResult(issues, diagnostics);
-        }
-
-        ProjectLocator.RejectLink(_issuesDirectory);
-        foreach (var path in Directory.EnumerateFiles(_issuesDirectory, "*.md", SearchOption.TopDirectoryOnly)
-                     .OrderBy(path => path, StringComparer.Ordinal))
-        {
-            try
+            if (!Directory.Exists(directory))
             {
-                ProjectLocator.RejectLink(path);
-                var issue = ReadPath(path);
-                var fileIdText = Path.GetFileNameWithoutExtension(path);
-                if (!long.TryParse(fileIdText, NumberStyles.None, CultureInfo.InvariantCulture, out var fileId) ||
-                    fileId != issue.Id ||
-                    !string.Equals(fileIdText, fileId.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal))
+                continue;
+            }
+
+            ProjectLocator.RejectLink(directory);
+            foreach (var path in Directory.EnumerateFiles(directory, "*.md", SearchOption.TopDirectoryOnly)
+                         .OrderBy(path => path, StringComparer.Ordinal))
+            {
+                try
                 {
-                    throw new IssueException("The filename must be the canonical numeric issue ID.");
-                }
+                    ProjectLocator.RejectLink(path);
+                    var issue = ReadPath(path);
+                    var fileIdText = Path.GetFileNameWithoutExtension(path);
+                    if (!long.TryParse(fileIdText, NumberStyles.None, CultureInfo.InvariantCulture, out var fileId) ||
+                        fileId != issue.Id ||
+                        !string.Equals(fileIdText, fileId.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal))
+                    {
+                        throw new IssueException("The filename must be the canonical numeric issue ID.");
+                    }
 
-                issues.Add(issue);
-            }
-            catch (Exception exception) when (exception is IssueException or IOException or UnauthorizedAccessException)
-            {
-                diagnostics.Add(new IssueDiagnostic(path, exception.Message));
+                    if (ambiguousIds.Contains(issue.Id))
+                    {
+                        diagnostics.Add(new IssueDiagnostic(path, $"Issue '{issue.Id}' exists in both status directories."));
+                        continue;
+                    }
+
+                    if (issuesById.Remove(issue.Id, out var duplicate))
+                    {
+                        ambiguousIds.Add(issue.Id);
+                        diagnostics.Add(new IssueDiagnostic(
+                            duplicate.Path,
+                            $"Issue '{issue.Id}' exists in both status directories."));
+                        diagnostics.Add(new IssueDiagnostic(
+                            path,
+                            $"Issue '{issue.Id}' exists in both status directories."));
+                        continue;
+                    }
+
+                    issuesById.Add(issue.Id, (issue, path));
+                }
+                catch (Exception exception) when (exception is IssueException or IOException or UnauthorizedAccessException)
+                {
+                    diagnostics.Add(new IssueDiagnostic(path, exception.Message));
+                }
             }
         }
 
+        var issues = issuesById.Values.Select(entry => entry.Issue).ToList();
         var knownIds = issues.Select(issue => issue.Id).ToHashSet();
         foreach (var issue in issues)
         {
@@ -79,11 +103,7 @@ public sealed class IssueRepository(string projectRoot)
 
     public Issue Read(long id)
     {
-        var path = GetIssuePath(id);
-        if (!File.Exists(path))
-        {
-            throw new IssueException($"Issue '{id}' was not found.");
-        }
+        var path = FindIssuePath(id) ?? throw new IssueException($"Issue '{id}' was not found.");
 
         ProjectLocator.RejectLink(path);
         var issue = ReadPath(path);
@@ -97,15 +117,15 @@ public sealed class IssueRepository(string projectRoot)
 
     public Issue Create(Issue issue)
     {
-        EnsureSafeDirectory();
-        Directory.CreateDirectory(_issuesDirectory);
+        EnsureSafeDirectories();
         using (AcquireAllocationLock())
         {
             issue.Id = GetNextId();
             ValidateIssue(issue);
             using var relationshipLock = References(issue).Any() ? AcquireRelationshipLock() : null;
             ValidateReferences(issue, List().Issues);
-            var path = GetIssuePath(issue.Id);
+            var path = GetIssuePath(issue.Id, issue.Status);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             using (AcquireLock(issue.Id.ToString(CultureInfo.InvariantCulture)))
             {
                 if (File.Exists(path) || Directory.Exists(path))
@@ -124,8 +144,7 @@ public sealed class IssueRepository(string projectRoot)
     {
         ValidateId(issue.Id);
         ValidateIssue(issue);
-        EnsureSafeDirectory();
-        var path = GetIssuePath(issue.Id);
+        EnsureSafeDirectories();
         var snapshot = Read(issue.Id);
         var relationshipsChanged = !snapshot.Parents.SequenceEqual(issue.Parents) ||
                                    !snapshot.Children.SequenceEqual(issue.Children) ||
@@ -135,11 +154,7 @@ public sealed class IssueRepository(string projectRoot)
         using var relationshipLock = relationshipsChanged ? AcquireRelationshipLock() : null;
         using (AcquireLock(issue.Id.ToString(CultureInfo.InvariantCulture)))
         {
-            if (!File.Exists(path))
-            {
-                throw new IssueException($"Issue '{issue.Id}' was not found.");
-            }
-
+            var path = FindIssuePath(issue.Id) ?? throw new IssueException($"Issue '{issue.Id}' was not found.");
             ProjectLocator.RejectLink(path);
             var current = ReadPath(path);
             if (!string.Equals(current.Revision, expectedRevision, StringComparison.Ordinal))
@@ -164,7 +179,24 @@ public sealed class IssueRepository(string projectRoot)
                 throw new IssueConflictException($"Issue '{issue.Id}' changed since it was read while the update was being prepared. Reload it and retry.");
             }
 
-            WriteAtomically(path, content, overwrite: true, expectedRevision);
+            var targetPath = GetIssuePath(issue.Id, issue.Status);
+            if (PathsEqual(path, targetPath))
+            {
+                WriteAtomically(path, content, overwrite: true, expectedRevision);
+            }
+            else
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+                ProjectLocator.RejectLink(targetPath);
+                if (File.Exists(targetPath) || Directory.Exists(targetPath))
+                {
+                    throw new IssueConflictException(
+                        $"Issue '{issue.Id}' already exists in the target status directory.");
+                }
+
+                File.Move(path, targetPath);
+                WriteAtomically(targetPath, content, overwrite: true, expectedRevision);
+            }
         }
 
         return Read(issue.Id);
@@ -176,22 +208,14 @@ public sealed class IssueRepository(string projectRoot)
     /// <exception cref="IssueException">The issue is missing or invalid.</exception>
     public void Delete(long id)
     {
-        var path = GetIssuePath(id);
-        if (!Directory.Exists(_issuesDirectory))
-        {
-            throw new IssueException($"Issue '{id}' was not found.");
-        }
-
-        ProjectLocator.RejectLink(_issuesDirectory);
+        ValidateId(id);
+        EnsureSafeDirectories();
         using (AcquireAllocationLock())
         using (AcquireRelationshipLock())
         using (AcquireLock(id.ToString(CultureInfo.InvariantCulture)))
         {
+            var path = FindIssuePath(id) ?? throw new IssueException($"Issue '{id}' was not found.");
             ProjectLocator.RejectLink(path);
-            if (!File.Exists(path))
-            {
-                throw new IssueException($"Issue '{id}' was not found.");
-            }
 
             var issue = ReadPath(path);
             if (issue.Id != id)
@@ -244,25 +268,110 @@ public sealed class IssueRepository(string projectRoot)
     public string GetIssuePath(long id)
     {
         ValidateId(id);
-        EnsureSafeDirectory();
-        return Path.Combine(_issuesDirectory, id.ToString(CultureInfo.InvariantCulture) + ".md");
+        return FindIssuePath(id) ?? GetIssuePath(id, IssueStatus.Open);
+    }
+
+    private string? FindIssuePath(long id)
+    {
+        ValidateId(id);
+        EnsureSafeDirectories();
+        string? foundPath = null;
+        foreach (var directory in GetIssueDirectories())
+        {
+            var path = Path.Combine(directory, id.ToString(CultureInfo.InvariantCulture) + ".md");
+            ProjectLocator.RejectLink(path);
+            if (Directory.Exists(path))
+            {
+                throw new IssueException($"Issue path '{path}' is a directory, not a file.");
+            }
+
+            if (!File.Exists(path))
+            {
+                continue;
+            }
+
+            if (foundPath is not null)
+            {
+                throw new IssueException($"Issue '{id}' exists in both status directories.");
+            }
+
+            foundPath = path;
+        }
+
+        return foundPath;
+    }
+
+    private string GetIssuePath(long id, IssueStatus status)
+    {
+        ValidateId(id);
+        EnsureSafeDirectories();
+        return Path.Combine(GetIssueDirectory(status), id.ToString(CultureInfo.InvariantCulture) + ".md");
+    }
+
+    private string GetIssueDirectory(IssueStatus status) =>
+        status switch
+        {
+            IssueStatus.Open => _openIssuesDirectory,
+            IssueStatus.Closed or IssueStatus.Declined => _closedIssuesDirectory,
+            _ => throw new IssueException($"Unsupported issue status '{status}'.")
+        };
+
+    private string[] GetIssueDirectories() => [_openIssuesDirectory, _closedIssuesDirectory];
+
+    private IssueStatus GetDirectoryStatus(string path)
+    {
+        var directory = Path.GetDirectoryName(Path.GetFullPath(path))
+                        ?? throw new IssueException($"Issue path '{path}' has no parent directory.");
+        if (PathsEqual(directory, _openIssuesDirectory))
+        {
+            return IssueStatus.Open;
+        }
+
+        if (PathsEqual(directory, _closedIssuesDirectory))
+        {
+            return IssueStatus.Closed;
+        }
+
+        throw new IssueException($"Issue file '{path}' is outside the open and closed directories.");
+    }
+
+    private static bool PathsEqual(string left, string right) =>
+        string.Equals(
+            Path.GetFullPath(left),
+            Path.GetFullPath(right),
+            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+
+    private string GetDataDirectory()
+    {
+        var dataDirectory = Path.Combine(ProjectRoot, ProjectLocator.DataDirectoryName);
+        ProjectLocator.RejectLink(dataDirectory);
+        return dataDirectory;
     }
 
     private long GetNextId()
     {
         var maxId = 0L;
-        foreach (var path in Directory.EnumerateFiles(_issuesDirectory, "*.md", SearchOption.TopDirectoryOnly))
+        foreach (var directory in GetIssueDirectories())
         {
-            ProjectLocator.RejectLink(path);
-            var name = Path.GetFileNameWithoutExtension(path);
-            if (name.Length > 0 && name.All(char.IsDigit))
+            if (!Directory.Exists(directory))
             {
-                if (!long.TryParse(name, NumberStyles.None, CultureInfo.InvariantCulture, out var id))
-                {
-                    throw new IssueException($"Numeric issue filename '{name}.md' exceeds the supported ID range.");
-                }
+                continue;
+            }
 
-                maxId = Math.Max(maxId, id);
+            ProjectLocator.RejectLink(directory);
+            foreach (var path in Directory.EnumerateFiles(directory, "*.md", SearchOption.TopDirectoryOnly))
+            {
+                ProjectLocator.RejectLink(path);
+                var name = Path.GetFileNameWithoutExtension(path);
+                if (name.Length > 0 && name.All(char.IsDigit))
+                {
+                    if (!long.TryParse(name, NumberStyles.None, CultureInfo.InvariantCulture, out var id))
+                    {
+                        throw new IssueException($"Numeric issue filename '{name}.md' exceeds the supported ID range.");
+                    }
+
+                    maxId = Math.Max(maxId, id);
+                }
             }
         }
 
@@ -312,11 +421,12 @@ public sealed class IssueRepository(string projectRoot)
         return reservedId;
     }
 
-    private void EnsureSafeDirectory()
+    private void EnsureSafeDirectories()
     {
-        if (!string.Equals(ProjectLocator.GetIssuesDirectory(ProjectRoot), _issuesDirectory, StringComparison.Ordinal))
+        if (!PathsEqual(ProjectLocator.GetOpenIssuesDirectory(ProjectRoot), _openIssuesDirectory) ||
+            !PathsEqual(ProjectLocator.GetClosedIssuesDirectory(ProjectRoot), _closedIssuesDirectory))
         {
-            throw new IssueException("The issue directory changed unexpectedly.");
+            throw new IssueException("The issue directories changed unexpectedly.");
         }
     }
 
@@ -362,7 +472,7 @@ public sealed class IssueRepository(string projectRoot)
                 var bodyStart = end < raw.Length ? end + 1 : end;
                 var frontmatterText = raw[contentStart..(cursor > 0 && raw[cursor - 1] == '\r' ? cursor - 1 : cursor)];
                 var body = raw[bodyStart..];
-                return ParseFrontmatter(frontmatterText, body, lineEnding, revision);
+                return ParseFrontmatter(frontmatterText, body, lineEnding, revision, GetDirectoryStatus(path));
             }
 
             if (end == raw.Length)
@@ -376,7 +486,12 @@ public sealed class IssueRepository(string projectRoot)
         throw new IssueException("Expected a closing '---' after YAML frontmatter.");
     }
 
-    private static Issue ParseFrontmatter(string text, string body, string lineEnding, string revision)
+    private static Issue ParseFrontmatter(
+        string text,
+        string body,
+        string lineEnding,
+        string revision,
+        IssueStatus directoryStatus)
     {
         try
         {
@@ -397,15 +512,20 @@ public sealed class IssueRepository(string projectRoot)
             }
 
             var schema = ReadInt(values, "schema");
-            if (schema is not (2 or 3))
+            if (schema is not (2 or 3 or 4))
             {
-                throw new IssueException($"Unsupported issue schema version {schema}; this program supports versions 2 and 3.");
+                throw new IssueException($"Unsupported issue schema version {schema}; this program supports versions 2, 3, and 4.");
             }
 
             var id = ReadLong(values, "id");
             ValidateId(id);
             var title = ReadString(values, "title");
-            var status = ParseEnum<IssueStatus>(ReadString(values, "status"), "status");
+            var metadataStatus = values.ContainsKey("status")
+                ? ParseEnum<IssueStatus>(ReadString(values, "status"), "status")
+                : (IssueStatus?)null;
+            var status = directoryStatus == IssueStatus.Open
+                ? IssueStatus.Open
+                : metadataStatus == IssueStatus.Declined ? IssueStatus.Declined : IssueStatus.Closed;
             var priority = ParseEnum<IssuePriority>(ReadString(values, "priority"), "priority");
             var draft = schema == 2 ? !ReadBool(values, "ready") : ReadBool(values, "draft");
             var created = ReadDate(values, "created_at");
@@ -457,10 +577,18 @@ public sealed class IssueRepository(string projectRoot)
     private static string Serialize(Issue issue)
     {
         var map = issue.Frontmatter ?? new YamlMappingNode();
-        Put(map, "schema", new YamlScalarNode("3"));
+        Put(map, "schema", new YamlScalarNode("4"));
         Put(map, "id", new YamlScalarNode(issue.Id.ToString(CultureInfo.InvariantCulture)));
         Put(map, "title", new YamlScalarNode(issue.Title));
-        Put(map, "status", new YamlScalarNode(issue.Status.ToString().ToLowerInvariant()));
+        if (issue.Status == IssueStatus.Declined)
+        {
+            Put(map, "status", new YamlScalarNode("declined"));
+        }
+        else
+        {
+            map.Children.Remove(new YamlScalarNode("status"));
+        }
+
         map.Children.Remove(new YamlScalarNode("ready"));
         Put(map, "draft", new YamlScalarNode(issue.Draft ? "true" : "false"));
         Put(map, "priority", new YamlScalarNode(issue.Priority.ToString().ToLowerInvariant()));
@@ -719,7 +847,7 @@ public sealed class IssueRepository(string projectRoot)
 
     private FileStream AcquireLock(string id)
     {
-        var lockPath = Path.Combine(_issuesDirectory, $".{id}.lock");
+        var lockPath = Path.Combine(GetDataDirectory(), $".{id}.lock");
         var deadline = DateTime.UtcNow.AddSeconds(10);
         while (true)
         {
@@ -748,7 +876,7 @@ public sealed class IssueRepository(string projectRoot)
 
     private FileStream AcquireRelationshipLock()
     {
-        var lockPath = Path.Combine(_issuesDirectory, ".relationships.lock");
+        var lockPath = Path.Combine(GetDataDirectory(), ".relationships.lock");
         var deadline = DateTime.UtcNow.AddSeconds(10);
         while (true)
         {
