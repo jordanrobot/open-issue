@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.UI;
 using Microsoft.UI.Dispatching;
+using Microsoft.UI.Input;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
@@ -14,6 +15,7 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.Windows.ApplicationModel.Resources;
 using OpenIssue.Core;
 using Windows.ApplicationModel.DataTransfer;
+using Windows.Foundation;
 using Windows.Graphics;
 using Windows.Storage.Pickers;
 using WinRT.Interop;
@@ -40,13 +42,17 @@ public sealed partial class MainWindow : Window
     private long? _draggedIssueId;
     private long? _pointerPressedIssueId;
     private long? _dropTargetIssueId;
+    private long? _relationshipDropTargetIssueId;
     private IssueDropHint _dropHint;
+    private bool _relationshipDropHandled;
     private readonly string? _launchArguments;
+    private ScrollViewer? _bodyScrollViewer;
     private double _expandedIssueListWidth;
     private double _expandedIssueListMinWidth;
     private double _expandedIssueDetailsWidth;
     private double _expandedIssueDetailsMinWidth;
     private long? _tagInputIssueId;
+    private ScrollContentPresenter? _bodyScrollContentPresenter;
 
     public MainWindowViewModel ViewModel { get; }
 
@@ -57,11 +63,29 @@ public sealed partial class MainWindow : Window
     public static Visibility EmptyStateVisibility(int issueCount, bool isRefreshing) =>
         issueCount == 0 && !isRefreshing ? Visibility.Visible : Visibility.Collapsed;
 
-    /// <summary>Determines whether the issue-reference suggestions list should be shown.</summary>
-    /// <param name="hasSuggestions">Whether autocomplete suggestions are available.</param>
-    /// <returns>Visible when suggestions are available.</returns>
-    public static Visibility SuggestionVisibility(bool hasSuggestions) =>
-        hasSuggestions ? Visibility.Visible : Visibility.Collapsed;
+    /// <summary>Formats the accessible name for removing a parent relationship.</summary>
+    /// <param name="issueLabel">The linked issue label.</param>
+    /// <returns>A localized action name.</returns>
+    public static string FormatParentRelationshipRemovalName(string issueLabel) =>
+        Format("RemoveParentRelationshipNameFormat", issueLabel);
+
+    /// <summary>Formats the accessible name for removing a child relationship.</summary>
+    /// <param name="issueLabel">The linked issue label.</param>
+    /// <returns>A localized action name.</returns>
+    public static string FormatChildRelationshipRemovalName(string issueLabel) =>
+        Format("RemoveChildRelationshipNameFormat", issueLabel);
+
+    /// <summary>Creates an automation ID for a parent relationship removal button.</summary>
+    /// <param name="issueId">The linked issue ID.</param>
+    /// <returns>A stable automation ID.</returns>
+    public static string ParentRelationshipRemovalAutomationId(long issueId) =>
+        $"RemoveParentRelationship_{issueId.ToString(CultureInfo.InvariantCulture)}";
+
+    /// <summary>Creates an automation ID for a child relationship removal button.</summary>
+    /// <param name="issueId">The linked issue ID.</param>
+    /// <returns>A stable automation ID.</returns>
+    public static string ChildRelationshipRemovalAutomationId(long issueId) =>
+        $"RemoveChildRelationship_{issueId.ToString(CultureInfo.InvariantCulture)}";
 
     /// <summary>Shows the temporary root-level drop target during an issue drag.</summary>
     public static Visibility DraggingVisibility(bool isDragging) =>
@@ -421,17 +445,27 @@ public sealed partial class MainWindow : Window
 
     private void IssueListItem_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
+        _relationshipDropTargetIssueId = ViewModel.IsEditorEnabled
+            ? ViewModel.SelectedIssue?.Id
+            : null;
         _pointerPressedIssueId = sender is TreeViewItem container
             ? ResolveIssueListItem(container)?.Id
             : null;
     }
 
-    private void IssueListItem_PointerReleased(object sender, PointerRoutedEventArgs e) =>
+    private void IssueListItem_PointerReleased(object sender, PointerRoutedEventArgs e)
+    {
         _pointerPressedIssueId = null;
+        if (_draggedIssueId is null)
+        {
+            _relationshipDropTargetIssueId = null;
+        }
+    }
 
     private void IssueList_DragItemsStarting(TreeView sender, TreeViewDragItemsStartingEventArgs e)
     {
-        var issue = _pointerPressedIssueId is { } pressedIssueId
+        var pointerPressedIssueId = _pointerPressedIssueId;
+        var issue = pointerPressedIssueId is { } pressedIssueId
             ? ViewModel.Issues.FirstOrDefault(candidate => candidate.Id == pressedIssueId)
             : null;
         issue ??= e.Items
@@ -442,15 +476,25 @@ public sealed partial class MainWindow : Window
         if (e.Items.Count > 1 || issue is null)
         {
             _draggedIssueId = null;
+            _relationshipDropTargetIssueId = null;
+            _relationshipDropHandled = false;
             e.Cancel = true;
             return;
         }
 
         _draggedIssueId = issue.Id;
+        if (pointerPressedIssueId is null)
+        {
+            _relationshipDropTargetIssueId = ViewModel.IsEditorEnabled
+                ? ViewModel.SelectedIssue?.Id
+                : null;
+        }
+
         _dropTargetIssueId = null;
         _dropHint = IssueDropHint.None;
+        _relationshipDropHandled = false;
         ViewModel.BeginIssueDrag(issue);
-        e.Data.RequestedOperation = DataPackageOperation.Move;
+        e.Data.RequestedOperation = DataPackageOperation.Move | DataPackageOperation.Link;
         e.Data.SetText(MainWindowViewModel.FormatIssueLabel(issue.Id, issue.Title));
     }
 
@@ -547,6 +591,47 @@ public sealed partial class MainWindow : Window
         ViewModel.ClearIssueDropHint();
     }
 
+    private void ParentIssuesDropTarget_DragOver(object sender, DragEventArgs e) =>
+        RelationshipDropTarget_DragOver(sender, e, addingParents: true);
+
+    private void ChildIssuesDropTarget_DragOver(object sender, DragEventArgs e) =>
+        RelationshipDropTarget_DragOver(sender, e, addingParents: false);
+
+    private void RelationshipDropTarget_DragOver(
+        object sender,
+        DragEventArgs e,
+        bool addingParents)
+    {
+        if (sender is not Border dropTarget ||
+            !e.DataView.Contains(StandardDataFormats.Text) ||
+            _draggedIssueId is not { } draggedIssueId ||
+            _relationshipDropTargetIssueId is not { } targetIssueId ||
+            draggedIssueId == targetIssueId)
+        {
+            e.AcceptedOperation = DataPackageOperation.None;
+            ClearRelationshipDropTargetHighlight(sender);
+            return;
+        }
+
+        e.AcceptedOperation = DataPackageOperation.Link;
+        e.DragUIOverride.Caption = GetString(
+            addingParents ? "ParentIssuesDropCaption" : "ChildIssuesDropCaption");
+        e.DragUIOverride.IsCaptionVisible = true;
+        e.DragUIOverride.IsGlyphVisible = true;
+        dropTarget.BorderThickness = new Thickness(1);
+    }
+
+    private void IssueRelationshipDropTarget_DragLeave(object sender, DragEventArgs e) =>
+        ClearRelationshipDropTargetHighlight(sender);
+
+    private static void ClearRelationshipDropTargetHighlight(object sender)
+    {
+        if (sender is Border dropTarget)
+        {
+            dropTarget.BorderThickness = new Thickness(0);
+        }
+    }
+
     private async void IssueList_DragItemsCompleted(
         TreeView sender,
         TreeViewDragItemsCompletedEventArgs e)
@@ -554,10 +639,17 @@ public sealed partial class MainWindow : Window
         var draggedIssueId = _draggedIssueId;
         var dropTargetIssueId = _dropTargetIssueId;
         var dropHint = _dropHint;
+        var relationshipDropHandled = _relationshipDropHandled;
         _draggedIssueId = null;
         _dropTargetIssueId = null;
+        _relationshipDropTargetIssueId = null;
         _dropHint = IssueDropHint.None;
-        if (draggedIssueId is null || e.DropResult != DataPackageOperation.Move)
+        _relationshipDropHandled = false;
+        ClearRelationshipDropTargetHighlight(ParentIssuesDropTarget);
+        ClearRelationshipDropTargetHighlight(ChildIssuesDropTarget);
+        if (relationshipDropHandled ||
+            draggedIssueId is null ||
+            e.DropResult != DataPackageOperation.Move)
         {
             ViewModel.EndIssueDrag();
             return;
@@ -655,6 +747,26 @@ public sealed partial class MainWindow : Window
         }
 
         return (null, null);
+    }
+
+    private static T? FindVisualDescendant<T>(DependencyObject parent)
+        where T : DependencyObject
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, index);
+            if (child is T match)
+            {
+                return match;
+            }
+
+            if (FindVisualDescendant<T>(child) is { } descendant)
+            {
+                return descendant;
+            }
+        }
+
+        return null;
     }
 
     private static IReadOnlyList<long> GetVisibleTreeOrder(IEnumerable<IssueListItem> roots)
@@ -808,6 +920,79 @@ public sealed partial class MainWindow : Window
     private async void AddChildIssuesButton_Click(object sender, RoutedEventArgs e) =>
         await AddIssueRelationshipsAsync(addingParents: false);
 
+    private async void ParentIssuesDropTarget_Drop(object sender, DragEventArgs e) =>
+        await AddIssueRelationshipFromDropAsync(addingParents: true, sender, e);
+
+    private async void ChildIssuesDropTarget_Drop(object sender, DragEventArgs e) =>
+        await AddIssueRelationshipFromDropAsync(addingParents: false, sender, e);
+
+    private async Task AddIssueRelationshipFromDropAsync(
+        bool addingParents,
+        object sender,
+        DragEventArgs e)
+    {
+        if (sender is not Border dropTarget ||
+            !e.DataView.Contains(StandardDataFormats.Text) ||
+            _draggedIssueId is not { } droppedIssueId ||
+            _relationshipDropTargetIssueId is not { } targetIssueId ||
+            droppedIssueId == targetIssueId)
+        {
+            e.AcceptedOperation = DataPackageOperation.None;
+            return;
+        }
+
+        e.AcceptedOperation = DataPackageOperation.Link;
+        _relationshipDropHandled = true;
+        ClearRelationshipDropTargetHighlight(dropTarget);
+
+        try
+        {
+            if (!await ConfirmLeaveCurrentAsync())
+            {
+                return;
+            }
+
+            var target = ViewModel.Issues.FirstOrDefault(issue => issue.Id == targetIssueId);
+            if (target is null)
+            {
+                await ShowMessageAsync(
+                    GetString("MessageCannotUpdateIssueLinksTitle"),
+                    Format("MessageRelatedIssueNotAvailable", targetIssueId));
+                return;
+            }
+
+            if (ViewModel.SelectedIssue?.Id != targetIssueId)
+            {
+                if (!await ViewModel.SelectIssueAsync(target.Issue))
+                {
+                    return;
+                }
+
+                IssueList.SelectedItem = target;
+            }
+
+            if (addingParents)
+            {
+                await ViewModel.AddParentIssuesAsync([droppedIssueId]);
+                ViewModel.ExpandIssueAncestors(targetIssueId);
+            }
+            else
+            {
+                await ViewModel.AddChildIssuesAsync([droppedIssueId]);
+                ViewModel.ExpandIssueAncestors(droppedIssueId);
+            }
+        }
+        catch (Exception exception) when (exception is IssueException or IOException or UnauthorizedAccessException)
+        {
+            await ShowMessageAsync(GetString("MessageCannotUpdateIssueLinksTitle"), exception.Message);
+            await ViewModel.RefreshIssuesAsync(preserveCurrentEditor: true);
+        }
+        finally
+        {
+            ClearRelationshipDropTargetHighlight(dropTarget);
+        }
+    }
+
     private async void RelatedIssue_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: long issueId } ||
@@ -840,6 +1025,39 @@ public sealed partial class MainWindow : Window
 
         ViewModel.ExpandIssueAncestors(issueId);
         IssueList.SelectedItem = row;
+    }
+
+    private async void RemoveParentRelationshipButton_Click(object sender, RoutedEventArgs e) =>
+        await RemoveIssueRelationshipAsync(removingParent: true, sender);
+
+    private async void RemoveChildRelationshipButton_Click(object sender, RoutedEventArgs e) =>
+        await RemoveIssueRelationshipAsync(removingParent: false, sender);
+
+    private async Task RemoveIssueRelationshipAsync(bool removingParent, object sender)
+    {
+        if (sender is not Button { Tag: long issueId } ||
+            ViewModel.SelectedIssue is null ||
+            !await ConfirmLeaveCurrentAsync())
+        {
+            return;
+        }
+
+        try
+        {
+            if (removingParent)
+            {
+                await ViewModel.RemoveParentIssueAsync(issueId);
+            }
+            else
+            {
+                await ViewModel.RemoveChildIssueAsync(issueId);
+            }
+        }
+        catch (Exception exception) when (exception is IssueException or IOException or UnauthorizedAccessException)
+        {
+            await ShowMessageAsync(GetString("MessageCannotUpdateIssueLinksTitle"), exception.Message);
+            await ViewModel.RefreshIssuesAsync(preserveCurrentEditor: true);
+        }
     }
 
     private async Task AddIssueRelationshipsAsync(bool addingParents)
@@ -1071,6 +1289,7 @@ public sealed partial class MainWindow : Window
 
     private void BodyBox_TextChanged(object sender, TextChangedEventArgs e)
     {
+        UpdateBodyInlineHighlights();
         if (ViewModel.IsLoadingIssue || ViewModel.SelectedIssue is null)
         {
             ViewModel.ClearIssueReferenceSuggestions();
@@ -1078,9 +1297,296 @@ public sealed partial class MainWindow : Window
         }
 
         Editor_Changed(sender, e);
-        if (_suppressIssueReferenceSuggestions ||
-            sender is not TextBox textBox ||
-            textBox.SelectionLength != 0 ||
+        if (sender is TextBox textBox)
+        {
+            UpdateIssueReferenceSuggestionsForCaret(textBox);
+        }
+    }
+
+    private void BodyBox_SelectionChanged(object sender, RoutedEventArgs e)
+    {
+        UpdateBodyInlineHighlights();
+        if (!ViewModel.IsLoadingIssue && ViewModel.SelectedIssue is not null && sender is TextBox textBox)
+        {
+            UpdateIssueReferenceSuggestionsForCaret(textBox);
+        }
+    }
+
+    private void BodyBox_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (_bodyScrollViewer is not null)
+        {
+            _bodyScrollViewer.ViewChanged -= BodyScrollViewer_ViewChanged;
+        }
+
+        _bodyScrollViewer = FindVisualDescendant<ScrollViewer>(BodyBox);
+        if (_bodyScrollViewer is not null)
+        {
+            _bodyScrollViewer.ViewChanged += BodyScrollViewer_ViewChanged;
+        }
+
+        _bodyScrollContentPresenter =
+            FindVisualDescendant<ScrollContentPresenter>(BodyBox);
+        UpdateBodyInlineHighlights();
+    }
+
+    private void BodyBox_SizeChanged(object sender, SizeChangedEventArgs e) =>
+        UpdateBodyInlineHighlights();
+
+    private void BodyBox_ActualThemeChanged(FrameworkElement sender, object args) =>
+        UpdateBodyInlineHighlights();
+
+    private void BodyScrollViewer_ViewChanged(object? sender, ScrollViewerViewChangedEventArgs e) =>
+        UpdateBodyInlineHighlights();
+
+    private void UpdateBodyInlineHighlights()
+    {
+        BodyHighlightCanvas.Children.Clear();
+        if (!ViewModel.IsEditorEnabled ||
+            string.IsNullOrEmpty(BodyBox.Text) ||
+            BodyHighlightCanvas.ActualWidth <= 0 ||
+            BodyHighlightCanvas.ActualHeight <= 0 ||
+            _bodyScrollContentPresenter is not { } contentPresenter)
+        {
+            return;
+        }
+
+        var contentToCanvas = contentPresenter.TransformToVisual(BodyHighlightCanvas);
+        AddBodyInlineHighlights(
+            IssueBodyTagParser.GetTagRanges(BodyBox.Text),
+            (Style)RootGrid.Resources["IssueBodyTagHighlightStyle"],
+            contentToCanvas);
+        AddBodyInlineHighlights(
+            IssueBodyLinkParser.GetReferenceRanges(BodyBox.Text),
+            (Style)RootGrid.Resources["IssueBodyTagHighlightStyle"],
+            contentToCanvas);
+    }
+
+    private void AddBodyInlineHighlights(
+        IEnumerable<(int Start, int Length)> ranges,
+        Style style,
+        Microsoft.UI.Xaml.Media.GeneralTransform contentToCanvas)
+    {
+        foreach (var range in ranges)
+        {
+            foreach (var textRect in GetBodyTextRangeRects(
+                         range.Start,
+                         range.Length,
+                         contentToCanvas))
+            {
+                AddBodyInlineHighlight(textRect, style);
+            }
+        }
+    }
+
+    private IEnumerable<Rect> GetBodyTextRangeRects(
+        int start,
+        int length,
+        Microsoft.UI.Xaml.Media.GeneralTransform contentToCanvas)
+    {
+        var segmentTop = double.NaN;
+        var segmentHeight = 0d;
+        var segmentLeft = double.PositiveInfinity;
+        var segmentRight = double.NegativeInfinity;
+        var end = start + length;
+        for (var index = start; index < end; index++)
+        {
+            var leadingEdge = ToBodyHighlightCanvasRect(
+                BodyBox.GetRectFromCharacterIndex(index, false),
+                contentToCanvas);
+            var trailingEdge = ToBodyHighlightCanvasRect(
+                BodyBox.GetRectFromCharacterIndex(index, true),
+                contentToCanvas);
+            if (leadingEdge.IsEmpty || trailingEdge.IsEmpty)
+            {
+                continue;
+            }
+
+            var top = Math.Min(leadingEdge.Top, trailingEdge.Top);
+            if (!double.IsFinite(top))
+            {
+                continue;
+            }
+
+            if (!double.IsNaN(segmentTop) && Math.Abs(top - segmentTop) > 1)
+            {
+                if (segmentRight > segmentLeft)
+                {
+                    yield return new Rect(
+                        segmentLeft,
+                        segmentTop,
+                        segmentRight - segmentLeft,
+                        segmentHeight);
+                }
+
+                segmentTop = double.NaN;
+                segmentHeight = 0;
+                segmentLeft = double.PositiveInfinity;
+                segmentRight = double.NegativeInfinity;
+            }
+
+            if (double.IsNaN(segmentTop))
+            {
+                segmentTop = top;
+            }
+
+            segmentHeight = Math.Max(
+                segmentHeight,
+                Math.Max(leadingEdge.Height, trailingEdge.Height));
+            segmentLeft = Math.Min(
+                segmentLeft,
+                Math.Min(leadingEdge.X, trailingEdge.X));
+            segmentRight = Math.Max(
+                segmentRight,
+                Math.Max(leadingEdge.X, trailingEdge.X));
+        }
+
+        if (segmentRight > segmentLeft)
+        {
+            yield return new Rect(
+                segmentLeft,
+                segmentTop,
+                segmentRight - segmentLeft,
+                segmentHeight);
+        }
+    }
+
+    private static Rect ToBodyHighlightCanvasRect(
+        Rect textContentRect,
+        Microsoft.UI.Xaml.Media.GeneralTransform contentToCanvas)
+    {
+        if (textContentRect.IsEmpty)
+        {
+            return Rect.Empty;
+        }
+
+        var topLeft = contentToCanvas.TransformPoint(
+            new Point(textContentRect.Left, textContentRect.Top));
+        var bottomRight = contentToCanvas.TransformPoint(
+            new Point(textContentRect.Right, textContentRect.Bottom));
+        return new Rect(topLeft, bottomRight);
+    }
+
+    private void AddBodyInlineHighlight(Rect textRect, Style style)
+    {
+        const double horizontalPadding = 4;
+        const double verticalInset = 1;
+
+        var canvasWidth = BodyHighlightCanvas.ActualWidth;
+        var canvasHeight = BodyHighlightCanvas.ActualHeight;
+        var left = Math.Max(0, textRect.Left - horizontalPadding);
+        var right = Math.Min(canvasWidth, textRect.Right + horizontalPadding);
+        var top = Math.Max(0, textRect.Top + verticalInset);
+        var bottom = Math.Min(canvasHeight, textRect.Bottom - verticalInset);
+        if (right <= left || bottom <= top)
+        {
+            return;
+        }
+
+        var height = bottom - top;
+        var pill = new Border
+        {
+            Style = style,
+            Width = right - left,
+            Height = height,
+            CornerRadius = new CornerRadius(height / 2),
+            Opacity = BodyBox.ActualTheme == ElementTheme.Dark ? 0.42 : 1,
+            IsHitTestVisible = false
+        };
+        Canvas.SetLeft(pill, left);
+        Canvas.SetTop(pill, top);
+        BodyHighlightCanvas.Children.Add(pill);
+    }
+
+    private void MarkdownHeading_Click(object sender, RoutedEventArgs e) =>
+        ApplyMarkdownEdit(MarkdownTextEditor.CreateHeadingEdit(
+            BodyBox.Text,
+            BodyBox.SelectionStart,
+            BodyBox.SelectionLength));
+
+    private void MarkdownBold_Click(object sender, RoutedEventArgs e) =>
+        ApplyMarkdownEdit(MarkdownTextEditor.CreateInlineFormatEdit(
+            BodyBox.Text,
+            BodyBox.SelectionStart,
+            BodyBox.SelectionLength,
+            "**",
+            "**"));
+
+    private void MarkdownItalic_Click(object sender, RoutedEventArgs e) =>
+        ApplyMarkdownEdit(MarkdownTextEditor.CreateInlineFormatEdit(
+            BodyBox.Text,
+            BodyBox.SelectionStart,
+            BodyBox.SelectionLength,
+            "*",
+            "*"));
+
+    private void MarkdownLink_Click(object sender, RoutedEventArgs e) =>
+        ApplyMarkdownEdit(MarkdownTextEditor.CreateLinkEdit(
+            BodyBox.Text,
+            BodyBox.SelectionStart,
+            BodyBox.SelectionLength));
+
+    private void MarkdownBulletedList_Click(object sender, RoutedEventArgs e) =>
+        ApplyMarkdownEdit(MarkdownTextEditor.CreateListEdit(
+            BodyBox.Text,
+            BodyBox.SelectionStart,
+            BodyBox.SelectionLength,
+            MarkdownListKind.Bulleted));
+
+    private void MarkdownNumberedList_Click(object sender, RoutedEventArgs e) =>
+        ApplyMarkdownEdit(MarkdownTextEditor.CreateListEdit(
+            BodyBox.Text,
+            BodyBox.SelectionStart,
+            BodyBox.SelectionLength,
+            MarkdownListKind.Numbered));
+
+    private void MarkdownCheckboxList_Click(object sender, RoutedEventArgs e) =>
+        ApplyMarkdownEdit(MarkdownTextEditor.CreateListEdit(
+            BodyBox.Text,
+            BodyBox.SelectionStart,
+            BodyBox.SelectionLength,
+            MarkdownListKind.Checkbox));
+
+    private void MarkdownIndent_Click(object sender, RoutedEventArgs e) =>
+        ApplyMarkdownEdit(MarkdownTextEditor.CreateIndentEdit(
+            BodyBox.Text,
+            BodyBox.SelectionStart,
+            BodyBox.SelectionLength));
+
+    private void MarkdownOutdent_Click(object sender, RoutedEventArgs e)
+    {
+        if (MarkdownTextEditor.TryCreateOutdentEdit(
+                BodyBox.Text,
+                BodyBox.SelectionStart,
+                BodyBox.SelectionLength,
+                out var edit))
+        {
+            ApplyMarkdownEdit(edit);
+        }
+        else
+        {
+            BodyBox.Focus(FocusState.Programmatic);
+        }
+    }
+
+    private void ApplyMarkdownEdit(MarkdownTextEdit edit)
+    {
+        BodyBox.SelectionStart = edit.Start;
+        BodyBox.SelectionLength = edit.Length;
+        BodyBox.SelectedText = edit.Replacement;
+        BodyBox.SelectionStart = edit.Start + edit.CaretOffset;
+        BodyBox.SelectionLength = edit.SelectionLength;
+        BodyBox.Focus(FocusState.Programmatic);
+    }
+
+    private void UpdateIssueReferenceSuggestionsForCaret(TextBox textBox)
+    {
+        if (_suppressIssueReferenceSuggestions)
+        {
+            return;
+        }
+
+        if (textBox.SelectionLength != 0 ||
             !IssueBodyLinkParser.TryGetReferenceAtCaret(
                 textBox.Text,
                 textBox.SelectionStart,
@@ -1097,6 +1603,54 @@ public sealed partial class MainWindow : Window
         ViewModel.UpdateIssueReferenceSuggestions(prefix);
         IssueReferenceSuggestionsList.SelectedIndex =
             ViewModel.IssueReferenceSuggestions.Count > 0 ? 0 : -1;
+        UpdateIssueReferenceSuggestionsPosition();
+    }
+
+    private void UpdateIssueReferenceSuggestionsPosition()
+    {
+        if (!ViewModel.HasIssueReferenceSuggestions || BodyBox.Text.Length == 0)
+        {
+            return;
+        }
+
+        var caretIndex = Math.Clamp(BodyBox.SelectionStart, 0, BodyBox.Text.Length);
+        var characterIndex = Math.Min(caretIndex, BodyBox.Text.Length - 1);
+        var caretRect = BodyBox.GetRectFromCharacterIndex(
+            characterIndex,
+            caretIndex == BodyBox.Text.Length);
+        if (caretRect.IsEmpty)
+        {
+            return;
+        }
+
+        var caretPosition = BodyBox.TransformToVisual(RootGrid)
+            .TransformPoint(new Point(caretRect.X, caretRect.Y + caretRect.Height));
+        var margin = RootGrid.Margin;
+        var popupContent = IssueReferenceSuggestionsPopup.Child as FrameworkElement;
+        var popupWidth = popupContent?.Width ?? 0;
+        var popupHeight = popupContent is { ActualHeight: > 0 }
+            ? popupContent.ActualHeight
+            : popupContent?.MaxHeight ?? 144;
+        var horizontalOffset = margin.Left + caretPosition.X;
+        if (popupWidth > 0)
+        {
+            horizontalOffset = Math.Clamp(
+                horizontalOffset,
+                margin.Left,
+                Math.Max(margin.Left, margin.Left + RootGrid.ActualWidth - popupWidth));
+        }
+
+        var verticalOffset = margin.Top + caretPosition.Y + 4;
+        var windowBottom = margin.Top + RootGrid.ActualHeight;
+        if (popupHeight > 0 && verticalOffset + popupHeight > windowBottom)
+        {
+            verticalOffset = Math.Max(
+                margin.Top,
+                margin.Top + caretPosition.Y - popupHeight - caretRect.Height - 4);
+        }
+
+        IssueReferenceSuggestionsPopup.HorizontalOffset = horizontalOffset;
+        IssueReferenceSuggestionsPopup.VerticalOffset = verticalOffset;
     }
 
     private void IssueReferenceSuggestionsList_ItemClick(object sender, ItemClickEventArgs e)
@@ -1156,10 +1710,27 @@ public sealed partial class MainWindow : Window
                         0);
                     e.Handled = true;
                     return;
-                case VirtualKey.Enter when IssueReferenceSuggestionsList.SelectedItem is IssueListItem suggestion:
-                    ApplyIssueReferenceSuggestion(suggestion);
-                    e.Handled = true;
-                    return;
+                case VirtualKey.Enter:
+                {
+                    var suggestion = IssueReferenceSuggestionsList.SelectedItem as IssueListItem;
+                    if (suggestion is null && ViewModel.IssueReferenceSuggestions.Count > 0)
+                    {
+                        var selectedIndex = Math.Clamp(
+                            IssueReferenceSuggestionsList.SelectedIndex,
+                            0,
+                            ViewModel.IssueReferenceSuggestions.Count - 1);
+                        suggestion = ViewModel.IssueReferenceSuggestions[selectedIndex];
+                    }
+
+                    if (suggestion is not null)
+                    {
+                        ApplyIssueReferenceSuggestion(suggestion);
+                        e.Handled = true;
+                        return;
+                    }
+
+                    break;
+                }
                 case VirtualKey.Escape:
                     ViewModel.ClearIssueReferenceSuggestions();
                     e.Handled = true;
@@ -1167,8 +1738,47 @@ public sealed partial class MainWindow : Window
             }
         }
 
+        if (e.Key == VirtualKey.Enter &&
+            sender is TextBox bodyTextBox &&
+            MarkdownTextEditor.TryCreateEnterEdit(
+                bodyTextBox.Text,
+                bodyTextBox.SelectionStart,
+                bodyTextBox.SelectionLength,
+                out var enterEdit))
+        {
+            ApplyMarkdownEdit(enterEdit);
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key != VirtualKey.Tab || sender is not TextBox textBox)
         {
+            return;
+        }
+
+        if (Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift)
+            .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down))
+        {
+            e.Handled = true;
+            if (MarkdownTextEditor.TryCreateOutdentEdit(
+                    textBox.Text,
+                    textBox.SelectionStart,
+                    textBox.SelectionLength,
+                    out var outdentEdit))
+            {
+                ApplyMarkdownEdit(outdentEdit);
+            }
+
+            return;
+        }
+
+        if (textBox.SelectionLength > 0)
+        {
+            ApplyMarkdownEdit(MarkdownTextEditor.CreateIndentEdit(
+                textBox.Text,
+                textBox.SelectionStart,
+                textBox.SelectionLength));
+            e.Handled = true;
             return;
         }
 

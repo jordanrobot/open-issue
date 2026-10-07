@@ -22,6 +22,25 @@ public static class IssueBodyLinkParser
         return ReadIssueIds(ReferencePattern.Matches(body));
     }
 
+    /// <summary>Gets the ranges of every valid inline issue reference, including repeated references.</summary>
+    /// <param name="body">The issue body to parse.</param>
+    /// <returns>Start indices and lengths that include each reference's leading <c>#</c> character.</returns>
+    public static IReadOnlyList<(int Start, int Length)> GetReferenceRanges(string body)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+
+        var ranges = new List<(int Start, int Length)>();
+        foreach (Match match in ReferencePattern.Matches(body))
+        {
+            if (TryReadIssueId(match, out _))
+            {
+                ranges.Add((match.Index, match.Length));
+            }
+        }
+
+        return ranges;
+    }
+
     /// <summary>Gets unique positive issue IDs mentioned with the <c>Depends on #number</c> syntax.</summary>
     /// <param name="body">The issue body to parse.</param>
     /// <returns>Dependency issue IDs in their order of appearance.</returns>
@@ -29,6 +48,59 @@ public static class IssueBodyLinkParser
     {
         ArgumentNullException.ThrowIfNull(body);
         return ReadIssueIds(DependencyPattern.Matches(body));
+    }
+
+    internal static string RemoveDependency(string body, long issueId)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        if (issueId < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(issueId));
+        }
+
+        var matches = DependencyPattern.Matches(body)
+            .Cast<Match>()
+            .Where(match =>
+                long.TryParse(
+                    match.Groups["id"].Value,
+                    NumberStyles.None,
+                    CultureInfo.InvariantCulture,
+                    out var dependencyId) &&
+                dependencyId == issueId)
+            .ToArray();
+        if (matches.Length == 0)
+        {
+            return body;
+        }
+
+        var updatedBody = body;
+        foreach (var match in matches.Reverse())
+        {
+            var matchEnd = match.Index + match.Length;
+            var lineStart = FindLineStart(body, match.Index);
+            var lineEnd = FindLineEnd(body, matchEnd);
+            var remainingLine = body[lineStart..match.Index] + body[matchEnd..lineEnd];
+            if (IsEmptyDependencyLine(remainingLine))
+            {
+                var removalEnd = lineEnd;
+                if (removalEnd < body.Length)
+                {
+                    removalEnd += body[removalEnd] == '\r' &&
+                                  removalEnd + 1 < body.Length &&
+                                  body[removalEnd + 1] == '\n'
+                        ? 2
+                        : 1;
+                }
+
+                updatedBody = updatedBody.Remove(lineStart, removalEnd - lineStart);
+            }
+            else
+            {
+                updatedBody = updatedBody.Remove(match.Index, match.Length);
+            }
+        }
+
+        return updatedBody;
     }
 
     /// <summary>Finds the issue-reference token at the caret in a body being edited.</summary>
@@ -189,14 +261,55 @@ public static class IssueBodyLinkParser
         var seen = new HashSet<long>();
         foreach (Match match in matches)
         {
-            if (long.TryParse(match.Groups["id"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var id) &&
-                id > 0 &&
-                seen.Add(id))
+            if (TryReadIssueId(match, out var id) && seen.Add(id))
             {
                 ids.Add(id);
             }
         }
 
         return ids;
+    }
+
+    private static bool TryReadIssueId(Match match, out long issueId) =>
+        long.TryParse(
+            match.Groups["id"].Value,
+            NumberStyles.None,
+            CultureInfo.InvariantCulture,
+            out issueId) &&
+        issueId > 0;
+
+    private static int FindLineStart(string text, int index)
+    {
+        var lineStart = index;
+        while (lineStart > 0 && text[lineStart - 1] is not '\r' and not '\n')
+        {
+            lineStart--;
+        }
+
+        return lineStart;
+    }
+
+    private static int FindLineEnd(string text, int index)
+    {
+        var lineEnd = index;
+        while (lineEnd < text.Length && text[lineEnd] is not '\r' and not '\n')
+        {
+            lineEnd++;
+        }
+
+        return lineEnd;
+    }
+
+    private static bool IsEmptyDependencyLine(string line)
+    {
+        var content = line.Trim();
+        if (content.Length == 0 || content is "-" or "+" or "*")
+        {
+            return true;
+        }
+
+        return content.Length > 1 &&
+               (content[^1] is '.' or ')') &&
+               content[..^1].All(char.IsAsciiDigit);
     }
 }

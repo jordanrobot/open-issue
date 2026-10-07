@@ -10,7 +10,10 @@ var tests = new (string Name, Action Run)[]
     ("dangling project symlinks cannot fall through to a parent project", DanglingProjectLink),
     ("issue creation, listing, search, and Unicode", IssueOperations),
     ("issue-body references and dependencies are parsed", IssueBodyLinks),
+    ("issue-body tags are parsed and filterable", IssueBodyTags),
+    ("Markdown editor formatting and indentation edits", MarkdownTextEditing),
     ("parent and child links can be added", IssueRelationshipLinks),
+    ("parent and child links can be removed", IssueRelationshipLinkRemoval),
     ("issues can be reparented and moved to the top level", IssueParentMoves),
     ("creator and timestamp metadata is persisted and immutable", IssueMetadata),
     ("new issues are drafts by default", DraftByDefault),
@@ -18,7 +21,7 @@ var tests = new (string Name, Action Run)[]
     ("legacy ready values map to draft values", LegacyReadyMetadata),
     ("numeric issue IDs are allocated without collisions", NumericIdAllocation),
     ("deleting an issue preserves its ID high-water mark", IssueDeletion),
-    ("referenced issues cannot be deleted", ReferencedIssueDeletion),
+    ("deleting a referenced issue removes its references", IssueDeletionRemovesReferences),
     ("deleting imported IDs does not reuse them", ImportedIssueIdDeletion),
     ("readiness and deterministic next selection", ReadinessAndNext),
     ("readiness is independent of issue status", ReadinessIsIndependentOfStatus),
@@ -141,9 +144,14 @@ static void IssueOperations()
 
 static void IssueBodyLinks()
 {
-    const string body = "See #12 and #5; avoid ##2.\nDepends on #5\n- depends on #12\n";
-    Equal("12,5", string.Join(',', IssueBodyLinkParser.GetReferences(body)));
-    Equal("5,12", string.Join(',', IssueBodyLinkParser.GetDependencies(body)));
+    using var project = new TemporaryProject();
+    var firstDependency = project.Service.Create("First dependency", "");
+    var secondDependency = project.Service.Create("Second dependency", "");
+    var body =
+        $"See #{secondDependency.Id} and #{firstDependency.Id}; avoid ##2.\n" +
+        $"Depends on #{firstDependency.Id}\n- depends on #{secondDependency.Id}\n";
+    Equal($"{secondDependency.Id},{firstDependency.Id}", string.Join(',', IssueBodyLinkParser.GetReferences(body)));
+    Equal($"{firstDependency.Id},{secondDependency.Id}", string.Join(',', IssueBodyLinkParser.GetDependencies(body)));
 
     const string textWithReference = "Before #12 after";
     True(IssueBodyLinkParser.TryReplaceReference(
@@ -157,9 +165,8 @@ static void IssueBodyLinks()
     Equal("Before #123 after", updatedText);
     Equal(11, caretIndex);
 
-    using var project = new TemporaryProject();
     var issue = project.Service.Create("Dependencies", body);
-    Equal("5,12", string.Join(',', issue.Dependencies));
+    Equal($"{firstDependency.Id},{secondDependency.Id}", string.Join(',', issue.Dependencies));
 
     const string token = "Depends on #12";
     True(IssueBodyLinkParser.TryGetReferenceAtCaret(
@@ -182,6 +189,179 @@ static void IssueBodyLinks()
     Equal("12,123,13", string.Join(',', suggestions.Select(suggestion => suggestion.Id)));
 }
 
+static void IssueBodyTags()
+{
+    using var project = new TemporaryProject();
+    const string body =
+        "Use #docs, #release-2, and #Café; repeat #DOCS, link #123, heading # heading, " +
+        "and ##ignored; not embeddedword#inside.";
+    Equal("docs,release-2,Café", string.Join(',', IssueBodyTagParser.GetTags(body)));
+    Equal("123", string.Join(',', IssueBodyLinkParser.GetReferences(body)));
+    var tagCaret = body.IndexOf("#docs", StringComparison.Ordinal) + "#docs".Length;
+    True(!IssueBodyLinkParser.TryGetReferenceAtCaret(body, tagCaret, out _, out _, out _),
+        "a body tag was treated as an issue reference");
+    Equal(
+        "Keep #docs-v2; remove .",
+        IssueBodyTagParser.RemoveInlineTag("Keep #docs-v2; remove #docs.", "DOCS"));
+
+    var issue = project.Service.Create("Inline tags", body, tags: ["Docs"]);
+    Equal("Docs,release-2,Café", string.Join(',', issue.EffectiveTags));
+    Equal("Docs", string.Join(',', issue.Tags));
+    Equal(1, project.Service.List(new IssueFilter(Tag: "release-2")).Issues.Count);
+    Equal(1, project.Service.List(new IssueFilter(Tag: "café")).Issues.Count);
+    Equal(1, project.Service.Search("release-2").Count);
+
+    var updated = project.Service.Edit(issue.Id.ToString(), body: "No inline tags.");
+    Equal(0, project.Service.List(new IssueFilter(Tag: "release-2")).Issues.Count);
+    Equal("Docs", string.Join(',', updated.EffectiveTags));
+
+    const string highlightedBody = "Tag #docs and #DOCS; issue #123 and #0; skip ##ignored.";
+    var tagRanges = IssueBodyTagParser.GetTagRanges(highlightedBody);
+    Equal(
+        $"{highlightedBody.IndexOf("#docs", StringComparison.Ordinal)}:5," +
+        $"{highlightedBody.IndexOf("#DOCS", StringComparison.Ordinal)}:5",
+        string.Join(',', tagRanges.Select(range => $"{range.Start}:{range.Length}")));
+    var referenceRange = IssueBodyLinkParser.GetReferenceRanges(highlightedBody).Single();
+    Equal(highlightedBody.IndexOf("#123", StringComparison.Ordinal), referenceRange.Start);
+    Equal(4, referenceRange.Length);
+}
+
+static void MarkdownTextEditing()
+{
+    const string checkedItem = "- [x] Finish the task";
+    True(MarkdownTextEditor.TryCreateEnterEdit(
+            checkedItem,
+            checkedItem.Length,
+            0,
+            out var checkedItemEdit),
+        "a Markdown task item did not provide a continuation edit");
+    var continuedChecklist = ApplyTextEdit(checkedItem, checkedItemEdit);
+    Equal(checkedItem + Environment.NewLine + "- [ ] ", continuedChecklist);
+    Equal(continuedChecklist.Length, checkedItemEdit.Start + checkedItemEdit.CaretOffset);
+
+    const string emptyItem = "\t- [ ] ";
+    True(MarkdownTextEditor.TryCreateEnterEdit(
+            emptyItem,
+            emptyItem.Length,
+            0,
+            out var emptyItemEdit),
+        "an empty Markdown task item did not provide an exit edit");
+    Equal("\t", ApplyTextEdit(emptyItem, emptyItemEdit));
+    Equal(1, emptyItemEdit.CaretOffset);
+
+    const string orderedItem = "9. Finish the task";
+    True(MarkdownTextEditor.TryCreateEnterEdit(
+            orderedItem,
+            orderedItem.Length,
+            0,
+            out var orderedItemEdit),
+        "an ordered list item did not provide a continuation edit");
+    Equal(orderedItem + Environment.NewLine + "10. ", ApplyTextEdit(orderedItem, orderedItemEdit));
+
+    const string tabbedLine = "\t\tlet value = 1;";
+    var splitIndex = tabbedLine.IndexOf("value", StringComparison.Ordinal);
+    True(MarkdownTextEditor.TryCreateEnterEdit(
+            tabbedLine,
+            splitIndex,
+            0,
+            out var tabbedLineEdit),
+        "an indented line did not provide an indentation edit");
+    Equal(
+        tabbedLine[..splitIndex] + Environment.NewLine + "\t\t" + tabbedLine[splitIndex..],
+        ApplyTextEdit(tabbedLine, tabbedLineEdit));
+
+    const string crlfItem = "- Finish the task\r\nNext line";
+    var crlfCaret = crlfItem.IndexOf("\r\n", StringComparison.Ordinal);
+    True(MarkdownTextEditor.TryCreateEnterEdit(
+            crlfItem,
+            crlfCaret,
+            0,
+            out var crlfEdit),
+        "a list item did not provide a CRLF continuation edit");
+    Equal("- Finish the task\r\n- \r\nNext line", ApplyTextEdit(crlfItem, crlfEdit));
+    True(!MarkdownTextEditor.TryCreateEnterEdit("plain text", 5, 0, out _),
+        "an unindented paragraph was intercepted");
+    True(!MarkdownTextEditor.TryCreateEnterEdit("- selected", 2, 3, out _),
+        "a selection was intercepted");
+
+    const string indentedBlock = "    first\r\n\tsecond\r\nthird";
+    True(MarkdownTextEditor.TryCreateOutdentEdit(
+            indentedBlock,
+            0,
+            indentedBlock.Length,
+            out var outdentEdit),
+        "an indented selection did not provide an outdent edit");
+    Equal("first\r\nsecond\r\nthird", ApplyTextEdit(indentedBlock, outdentEdit));
+    Equal(outdentEdit.Replacement.Length, outdentEdit.SelectionLength);
+    True(!MarkdownTextEditor.TryCreateOutdentEdit("unindented", 0, 0, out _),
+        "an unindented line provided an outdent edit");
+
+    const string linesToIndent = "first\r\nsecond";
+    var indentEdit = MarkdownTextEditor.CreateIndentEdit(
+        linesToIndent,
+        0,
+        linesToIndent.Length);
+    Equal("\tfirst\r\n\tsecond", ApplyTextEdit(linesToIndent, indentEdit));
+    Equal(indentEdit.Replacement.Length, indentEdit.SelectionLength);
+
+    var boldEdit = MarkdownTextEditor.CreateInlineFormatEdit(
+        "hello world",
+        6,
+        5,
+        "**",
+        "**");
+    Equal("**world**", boldEdit.Replacement);
+    Equal(2, boldEdit.CaretOffset);
+    Equal(5, boldEdit.SelectionLength);
+    var emptyBoldEdit = MarkdownTextEditor.CreateInlineFormatEdit("hello", 2, 0, "**", "**");
+    Equal("****", emptyBoldEdit.Replacement);
+    Equal(2, emptyBoldEdit.CaretOffset);
+
+    var selectedLinkEdit = MarkdownTextEditor.CreateLinkEdit("visit docs", 6, 4);
+    Equal("[docs](url)", selectedLinkEdit.Replacement);
+    Equal(7, selectedLinkEdit.CaretOffset);
+    Equal(3, selectedLinkEdit.SelectionLength);
+    var emptyLinkEdit = MarkdownTextEditor.CreateLinkEdit("visit ", 6, 0);
+    Equal("[text](url)", emptyLinkEdit.Replacement);
+    Equal(1, emptyLinkEdit.CaretOffset);
+    Equal(4, emptyLinkEdit.SelectionLength);
+
+    var headingEdit = MarkdownTextEditor.CreateHeadingEdit("title", 0, 5);
+    Equal("# title", headingEdit.Replacement);
+    var existingHeadingEdit = MarkdownTextEditor.CreateHeadingEdit("## title", 0, 0);
+    Equal("# title", existingHeadingEdit.Replacement);
+    var levelOneHeadingEdit = MarkdownTextEditor.CreateHeadingEdit("# title", 0, 0);
+    Equal("title", levelOneHeadingEdit.Replacement);
+
+    var bulletEdit = MarkdownTextEditor.CreateListEdit(
+        "first\r\n- second",
+        0,
+        "first\r\n- second".Length,
+        MarkdownListKind.Bulleted);
+    Equal("- first\r\n- second", ApplyTextEdit("first\r\n- second", bulletEdit));
+    var numberedEdit = MarkdownTextEditor.CreateListEdit(
+        "- first\r\n- second",
+        0,
+        "- first\r\n- second".Length,
+        MarkdownListKind.Numbered);
+    Equal("1. first\r\n2. second", ApplyTextEdit("- first\r\n- second", numberedEdit));
+    var checkboxEdit = MarkdownTextEditor.CreateListEdit(
+        "- [x] first",
+        0,
+        "- [x] first".Length,
+        MarkdownListKind.Checkbox);
+    Equal("- [ ] first", ApplyTextEdit("- [x] first", checkboxEdit));
+
+    using var project = new TemporaryProject();
+    var issue = project.Service.Create("Checklist", "- [ ] pending\n- [x] complete\n");
+    const string updatedBody = "- [x] pending\n- [ ] complete\n";
+    project.Service.Edit(issue.Id.ToString(), body: updatedBody);
+    Equal(updatedBody, project.Service.Show(issue.Id.ToString()).Body);
+}
+
+static string ApplyTextEdit(string text, MarkdownTextEdit edit) =>
+    text[..edit.Start] + edit.Replacement + text[(edit.Start + edit.Length)..];
+
 static void IssueRelationshipLinks()
 {
     using var project = new TemporaryProject();
@@ -198,6 +378,42 @@ static void IssueRelationshipLinks()
     service.AddChildren(parent.Id.ToString(), [child.Id]);
     Equal(child.Id.ToString(), string.Join(',', service.Show(parent.Id.ToString()).Children));
     Throws<IssueException>(() => service.AddChildren(parent.Id.ToString(), [long.MaxValue]));
+}
+
+static void IssueRelationshipLinkRemoval()
+{
+    using var project = new TemporaryProject();
+    var service = project.Service;
+    var parent = service.Create("Parent", "");
+    var secondParent = service.Create("Second parent", "");
+    var child = service.Create("Child", "");
+
+    service.AddParents(child.Id.ToString(), [parent.Id, secondParent.Id]);
+    service.AddChildren(parent.Id.ToString(), [child.Id]);
+    service.AddChildren(secondParent.Id.ToString(), [child.Id]);
+
+    var afterFirstRemoval = service.RemoveParent(child.Id.ToString(), parent.Id);
+    Equal(secondParent.Id.ToString(), string.Join(',', afterFirstRemoval.Parents));
+    Equal(0, service.Show(parent.Id.ToString()).Children.Count);
+
+    var afterSecondRemoval = service.RemoveParent(child.Id.ToString(), secondParent.Id);
+    Equal(0, afterSecondRemoval.Parents.Count);
+    Equal(0, service.Show(secondParent.Id.ToString()).Children.Count);
+    Equal(afterSecondRemoval.Revision, service.RemoveParent(
+        child.Id.ToString(),
+        secondParent.Id,
+        afterSecondRemoval.Revision).Revision);
+
+    var childWithParentLink = service.Create("Child with parent link", "");
+    service.AddParents(childWithParentLink.Id.ToString(), [parent.Id]);
+    service.RemoveChild(parent.Id.ToString(), childWithParentLink.Id);
+    Equal(0, service.Show(childWithParentLink.Id.ToString()).Parents.Count);
+
+    var explicitlyLinkedChild = service.Create("Explicit child", "");
+    service.AddChildren(parent.Id.ToString(), [explicitlyLinkedChild.Id]);
+    var updatedParent = service.RemoveChild(parent.Id.ToString(), explicitlyLinkedChild.Id);
+    Equal(0, updatedParent.Children.Count);
+    Equal(0, service.Show(explicitlyLinkedChild.Id.ToString()).Parents.Count);
 }
 
 static void IssueParentMoves()
@@ -357,20 +573,42 @@ static void IssueDeletion()
     Equal(2L, service.Create("After deletion", "Draft").Id);
 }
 
-static void ReferencedIssueDeletion()
+static void IssueDeletionRemovesReferences()
 {
     using var project = new TemporaryProject();
     var service = project.Service;
-    var source = service.Create("Source", "Draft");
-    var target = service.Create("Target", "Draft");
-    service.Edit(source.Id.ToString(), children: [target.Id]);
+    var remainingChild = service.Create("Remaining child", "");
+    var parentOfChild = service.Create("Parent of child", "");
+    var targetChild = service.Create("Target child", "");
+    service.Edit(parentOfChild.Id.ToString(), children: [targetChild.Id, remainingChild.Id]);
 
-    Throws<IssueException>(() => service.Delete(target.Id.ToString()));
-    True(File.Exists(service.Repository.GetIssuePath(target.Id)), "referenced issue was deleted");
+    var remainingDependency = service.Create("Remaining dependency", "");
+    var targetDependency = service.Create("Target dependency", "");
+    var dependent = service.Create(
+        "Dependent",
+        $"- Depends on #{targetDependency.Id}\n- Depends on #{remainingDependency.Id}\n");
+    var blocker = service.Create("Blocker", "");
+    service.Edit(blocker.Id.ToString(), blocks: [targetDependency.Id, remainingDependency.Id]);
+    var related = service.Create("Related", "");
+    service.Edit(related.Id.ToString(), related: [targetDependency.Id, remainingDependency.Id]);
 
-    service.Edit(source.Id.ToString(), children: []);
-    service.Delete(target.Id.ToString());
-    Equal(1, service.List().Issues.Count);
+    var otherParent = service.Create("Other parent", "");
+    var targetParent = service.Create("Target parent", "");
+    var childOfParent = service.Create("Child of parent", "");
+    service.Edit(childOfParent.Id.ToString(), parents: [targetParent.Id, otherParent.Id]);
+
+    service.Delete(targetChild.Id.ToString());
+    service.Delete(targetDependency.Id.ToString());
+    service.Delete(targetParent.Id.ToString());
+
+    Equal(remainingChild.Id, service.Show(parentOfChild.Id.ToString()).Children.Single());
+    Equal(remainingDependency.Id, service.Show(dependent.Id.ToString()).Dependencies.Single());
+    Equal($"- Depends on #{remainingDependency.Id}\n", service.Show(dependent.Id.ToString()).Body);
+    Equal(remainingDependency.Id, service.Show(blocker.Id.ToString()).Blocks.Single());
+    Equal(remainingDependency.Id, service.Show(related.Id.ToString()).Related.Single());
+    Equal(otherParent.Id, service.Show(childOfParent.Id.ToString()).Parents.Single());
+    Equal(0, service.List().Issues.Count(issue =>
+        issue.Id == targetChild.Id || issue.Id == targetDependency.Id || issue.Id == targetParent.Id));
     Equal(0, service.List().Diagnostics.Count);
 }
 

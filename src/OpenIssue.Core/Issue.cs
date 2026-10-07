@@ -23,6 +23,24 @@ public sealed class Issue
     public bool Draft { get; set; } = true;
     public IssuePriority Priority { get; set; } = IssuePriority.Normal;
     public List<string> Tags { get; set; } = [];
+    /// <summary>Gets explicit and inline body tags without case-insensitive duplicates.</summary>
+    public IReadOnlyList<string> EffectiveTags
+    {
+        get
+        {
+            var tags = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var tag in Tags.Concat(IssueBodyTagParser.GetTags(Body)))
+            {
+                if (seen.Add(tag))
+                {
+                    tags.Add(tag);
+                }
+            }
+
+            return tags;
+        }
+    }
     public string CreatedBy { get; set; } = string.Empty;
     public required DateTimeOffset CreatedAt { get; set; }
     public required DateTimeOffset UpdatedAt { get; set; }

@@ -121,10 +121,16 @@
     <value>Issues</value>
   </data>
   <data name="IssueListDragDropDescription" xml:space="preserve">
-    <value>Drag between rows to reorder, onto a different issue to reparent, or into open space to move to the top level. The row menu also offers Move to top level.</value>
+    <value>Drag between rows to reorder, onto a different issue to reparent, into open space to move to the top level, or into Parents or Children in Issue Details to add a relationship. The row menu also offers Move to top level.</value>
   </data>
   <data name="IssueListDragStartFormat" xml:space="preserve">
-    <value>Moving {0}. Drop on an issue to reparent, between rows to reorder, or into open space to remove its parent links.</value>
+    <value>Dragging {0}. Drop on an issue to reparent, between rows to reorder, into open space to remove its parent links, or into Parents or Children to add a relationship.</value>
+  </data>
+  <data name="ParentIssuesDropCaption" xml:space="preserve">
+    <value>Add as parent</value>
+  </data>
+  <data name="ChildIssuesDropCaption" xml:space="preserve">
+    <value>Add as child</value>
   </data>
   <data name="IssueListDropBeforeFormat" xml:space="preserve">
     <value>Move {0} before {1}.</value>
@@ -186,17 +192,137 @@
   <data name="ParentIssuesHeading.Text" xml:space="preserve">
     <value>Parents</value>
   </data>
+  <data name="ParentIssuesDropTarget.AutomationProperties.Name" xml:space="preserve">
+    <value>Parent issue relationships</value>
+  </data>
+  <data name="ParentIssuesDropTarget.AutomationProperties.HelpText" xml:space="preserve">
+    <value>Drop an issue here to add it as a parent.</value>
+  </data>
   <data name="ChildIssuesHeading.Text" xml:space="preserve">
     <value>Children</value>
   </data>
+  <data name="ChildIssuesDropTarget.AutomationProperties.Name" xml:space="preserve">
+    <value>Child issue relationships</value>
+  </data>
+  <data name="ChildIssuesDropTarget.AutomationProperties.HelpText" xml:space="preserve">
+    <value>Drop an issue here to add it as a child.</value>
+  </data>
   <data name="RelatedIssueButton.AutomationProperties.HelpText" xml:space="preserve">
     <value>Show the linked issue</value>
+  </data>
+  <data name="RemoveParentRelationshipButton.AutomationProperties.HelpText" xml:space="preserve">
+    <value>Remove this parent relationship without deleting the issue.</value>
+  </data>
+  <data name="RemoveChildRelationshipButton.AutomationProperties.HelpText" xml:space="preserve">
+    <value>Remove this child relationship without deleting the issue.</value>
   </data>
   <data name="BodyBox.Header" xml:space="preserve">
     <value>Issue body</value>
   </data>
   <data name="BodyBox.PlaceholderText" xml:space="preserve">
-    <value>Describe the issue here. Use #number to reference an issue, or Depends on #number to mark a dependency.</value>
+    <value>Describe the issue here. Use #tag to add a tag, #number to reference an issue, or Depends on #number to mark a dependency.</value>
+  </data>
+  <data name="MarkdownFormattingCommandBar.AutomationProperties.Name" xml:space="preserve">
+    <value>Markdown formatting</value>
+  </data>
+  <data name="MarkdownUndoButton.Label" xml:space="preserve">
+    <value>Undo</value>
+  </data>
+  <data name="MarkdownUndoButton.ToolTipService.ToolTip" xml:space="preserve">
+    <value>Undo (not available yet)</value>
+  </data>
+  <data name="MarkdownUndoButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Undo (not available yet)</value>
+  </data>
+  <data name="MarkdownRedoButton.Label" xml:space="preserve">
+    <value>Redo</value>
+  </data>
+  <data name="MarkdownRedoButton.ToolTipService.ToolTip" xml:space="preserve">
+    <value>Redo (not available yet)</value>
+  </data>
+  <data name="MarkdownRedoButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Redo (not available yet)</value>
+  </data>
+  <data name="MarkdownHeadingButton.Label" xml:space="preserve">
+    <value>Heading</value>
+  </data>
+  <data name="MarkdownHeadingButton.ToolTipService.ToolTip" xml:space="preserve">
+    <value>Toggle a level-one heading on the selected lines</value>
+  </data>
+  <data name="MarkdownHeadingButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Heading</value>
+  </data>
+  <data name="MarkdownBoldButton.Label" xml:space="preserve">
+    <value>Bold</value>
+  </data>
+  <data name="MarkdownBoldButton.ToolTipService.ToolTip" xml:space="preserve">
+    <value>Bold</value>
+  </data>
+  <data name="MarkdownBoldButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Bold</value>
+  </data>
+  <data name="MarkdownItalicButton.Label" xml:space="preserve">
+    <value>Italic</value>
+  </data>
+  <data name="MarkdownItalicButton.ToolTipService.ToolTip" xml:space="preserve">
+    <value>Italic</value>
+  </data>
+  <data name="MarkdownItalicButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Italic</value>
+  </data>
+  <data name="MarkdownLinkButton.Label" xml:space="preserve">
+    <value>Link</value>
+  </data>
+  <data name="MarkdownLinkButton.ToolTipService.ToolTip" xml:space="preserve">
+    <value>Insert a Markdown link</value>
+  </data>
+  <data name="MarkdownLinkButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Link</value>
+  </data>
+  <data name="MarkdownBulletedListButton.Label" xml:space="preserve">
+    <value>Bulleted list</value>
+  </data>
+  <data name="MarkdownBulletedListButton.ToolTipService.ToolTip" xml:space="preserve">
+    <value>Format the selected lines as a bulleted list</value>
+  </data>
+  <data name="MarkdownBulletedListButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Bulleted list</value>
+  </data>
+  <data name="MarkdownNumberedListButton.Label" xml:space="preserve">
+    <value>Numbered list</value>
+  </data>
+  <data name="MarkdownNumberedListButton.ToolTipService.ToolTip" xml:space="preserve">
+    <value>Format the selected lines as a numbered list</value>
+  </data>
+  <data name="MarkdownNumberedListButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Numbered list</value>
+  </data>
+  <data name="MarkdownCheckboxListButton.Label" xml:space="preserve">
+    <value>Checklist</value>
+  </data>
+  <data name="MarkdownCheckboxListButton.ToolTipService.ToolTip" xml:space="preserve">
+    <value>Format the selected lines as unchecked checklist items</value>
+  </data>
+  <data name="MarkdownCheckboxListButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Checklist</value>
+  </data>
+  <data name="MarkdownIndentButton.Label" xml:space="preserve">
+    <value>Indent</value>
+  </data>
+  <data name="MarkdownIndentButton.ToolTipService.ToolTip" xml:space="preserve">
+    <value>Indent the selected lines</value>
+  </data>
+  <data name="MarkdownIndentButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Indent</value>
+  </data>
+  <data name="MarkdownOutdentButton.Label" xml:space="preserve">
+    <value>Outdent</value>
+  </data>
+  <data name="MarkdownOutdentButton.ToolTipService.ToolTip" xml:space="preserve">
+    <value>Outdent the selected lines</value>
+  </data>
+  <data name="MarkdownOutdentButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Outdent</value>
   </data>
   <data name="NoIssueRelationships" xml:space="preserve">
     <value>None</value>
@@ -329,6 +455,15 @@
   </data>
   <data name="MessageIssueLinksSaved" xml:space="preserve">
     <value>Issue links saved.</value>
+  </data>
+  <data name="MessageIssueLinkRemoved" xml:space="preserve">
+    <value>Issue link removed.</value>
+  </data>
+  <data name="RemoveParentRelationshipNameFormat" xml:space="preserve">
+    <value>Remove parent relationship to {0}</value>
+  </data>
+  <data name="RemoveChildRelationshipNameFormat" xml:space="preserve">
+    <value>Remove child relationship to {0}</value>
   </data>
   <data name="IssueListMoveToRootContextMenuItem.Text" xml:space="preserve">
     <value>Move to top level</value>

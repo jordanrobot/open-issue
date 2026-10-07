@@ -38,7 +38,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private IReadOnlyList<Issue> _availableIssues = [];
     private IReadOnlyList<long> _issueOrder = [];
     private string _draggedIssueLabel = string.Empty;
+    private readonly List<string> _explicitTags = [];
     private string _tagSuggestionQuery = string.Empty;
+    private string _issueReferenceSuggestionPrefix = string.Empty;
+    private bool _issueReferenceSuggestionsActive;
     private IssueService? _service;
     private IssueListOrderStore? _issueListOrderStore;
     private CancellationTokenSource? _refreshCancellation;
@@ -160,7 +163,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         SelectedIssue is not null &&
         (IssueTitle != SelectedIssue.Title ||
          IssueBody != SelectedIssue.Body ||
-         !IssueTags.SequenceEqual(SelectedIssue.Tags, StringComparer.Ordinal) ||
+         !_explicitTags.SequenceEqual(SelectedIssue.Tags, StringComparer.Ordinal) ||
          SelectedIssueStatus?.Value != SelectedIssue.Status.ToString().ToLowerInvariant() ||
          SelectedIssuePriority?.Value != SelectedIssue.Priority.ToString().ToLowerInvariant() ||
          IsDraft != SelectedIssue.Draft);
@@ -207,6 +210,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(IsDirty))]
     public partial string IssueBody { get; set; }
 
+    partial void OnIssueBodyChanged(string value) => RefreshIssueTags();
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsDirty))]
     public partial FilterChoice? SelectedIssueStatus { get; set; }
@@ -247,7 +252,13 @@ public sealed partial class MainWindowViewModel : ObservableObject
     partial void OnSelectedIssueChanged(Issue? value)
     {
         RefreshIssueRelationships();
-        UpdateTagSuggestions(_tagSuggestionQuery);
+        _explicitTags.Clear();
+        if (value is not null)
+        {
+            _explicitTags.AddRange(value.Tags);
+        }
+
+        RefreshIssueTags();
     }
 
     public async Task<string> InitializeProjectAsync(string root)
@@ -272,6 +283,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
     /// <param name="idPrefix">Digits typed after the issue-reference marker.</param>
     public void UpdateIssueReferenceSuggestions(string idPrefix)
     {
+        _issueReferenceSuggestionPrefix = idPrefix;
+        _issueReferenceSuggestionsActive = true;
         IssueReferenceSuggestions.Clear();
         foreach (var issue in IssueBodyLinkParser.SuggestIssues(_availableIssues, idPrefix))
         {
@@ -284,6 +297,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
     /// <summary>Clears the issue-reference autocomplete results.</summary>
     public void ClearIssueReferenceSuggestions()
     {
+        _issueReferenceSuggestionPrefix = string.Empty;
+        _issueReferenceSuggestionsActive = false;
         IssueReferenceSuggestions.Clear();
         HasIssueReferenceSuggestions = false;
     }
@@ -297,7 +312,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         TagSuggestions.Clear();
 
         var suggestions = _availableIssues
-            .SelectMany(issue => issue.Tags)
+            .SelectMany(issue => issue.EffectiveTags)
             .Where(tag =>
                 !string.IsNullOrWhiteSpace(tag) &&
                 tag.StartsWith(_tagSuggestionQuery, StringComparison.OrdinalIgnoreCase))
@@ -321,19 +336,19 @@ public sealed partial class MainWindowViewModel : ObservableObject
                      ',',
                      StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
-            if (IssueTags.Contains(tag, StringComparer.OrdinalIgnoreCase))
+            if (_explicitTags.Contains(tag, StringComparer.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            IssueTags.Add(tag);
+            _explicitTags.Add(tag);
             added = true;
         }
 
         if (added)
         {
             OnPropertyChanged(nameof(IsDirty));
-            UpdateTagSuggestions(_tagSuggestionQuery);
+            RefreshIssueTags();
         }
 
         return added;
@@ -345,16 +360,47 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public bool RemoveIssueTag(string tag)
     {
         ArgumentNullException.ThrowIfNull(tag);
-        var index = IssueTags.IndexOf(tag);
-        if (index < 0)
+        var index = _explicitTags.FindIndex(existing =>
+            string.Equals(existing, tag, StringComparison.OrdinalIgnoreCase));
+        var removedExplicitTag = index >= 0;
+        if (removedExplicitTag)
+        {
+            _explicitTags.RemoveAt(index);
+        }
+
+        var updatedBody = IssueBodyTagParser.RemoveInlineTag(IssueBody, tag);
+        var removedInlineTag = !string.Equals(updatedBody, IssueBody, StringComparison.Ordinal);
+        if (!removedExplicitTag && !removedInlineTag)
         {
             return false;
         }
 
-        IssueTags.RemoveAt(index);
-        OnPropertyChanged(nameof(IsDirty));
-        UpdateTagSuggestions(_tagSuggestionQuery);
+        if (removedInlineTag)
+        {
+            IssueBody = updatedBody;
+        }
+        else
+        {
+            RefreshIssueTags();
+            OnPropertyChanged(nameof(IsDirty));
+        }
+
         return true;
+    }
+
+    private void RefreshIssueTags()
+    {
+        IssueTags.Clear();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var tag in _explicitTags.Concat(IssueBodyTagParser.GetTags(IssueBody)))
+        {
+            if (seen.Add(tag))
+            {
+                IssueTags.Add(tag);
+            }
+        }
+
+        UpdateTagSuggestions(_tagSuggestionQuery);
     }
 
     /// <summary>Lists unlinked open issues that can be added as parents or children of the selected issue.</summary>
@@ -411,6 +457,40 @@ public sealed partial class MainWindowViewModel : ObservableObject
             current.Revision));
         TrackSavedIssue(saved);
         StatusMessage = GetString("MessageIssueLinksSaved");
+    }
+
+    /// <summary>Removes a parent relationship from the selected issue.</summary>
+    /// <param name="parentId">The ID of the parent issue to unlink.</param>
+    public async Task RemoveParentIssueAsync(long parentId)
+    {
+        var service = _service ?? throw new IssueException("The issue project has not been initialized.");
+        var current = SelectedIssue ?? throw new IssueException("Select an issue before removing issue links.");
+        var saved = await Task.Run(() => service.RemoveParent(
+            current.Id.ToString(CultureInfo.InvariantCulture),
+            parentId,
+            current.Revision));
+        TrackSavedIssue(saved);
+        if (await RefreshIssuesAsync(preserveCurrentEditor: true))
+        {
+            StatusMessage = GetString("MessageIssueLinkRemoved");
+        }
+    }
+
+    /// <summary>Removes a child relationship from the selected issue.</summary>
+    /// <param name="childId">The ID of the child issue to unlink.</param>
+    public async Task RemoveChildIssueAsync(long childId)
+    {
+        var service = _service ?? throw new IssueException("The issue project has not been initialized.");
+        var current = SelectedIssue ?? throw new IssueException("Select an issue before removing issue links.");
+        var saved = await Task.Run(() => service.RemoveChild(
+            current.Id.ToString(CultureInfo.InvariantCulture),
+            childId,
+            current.Revision));
+        TrackSavedIssue(saved);
+        if (await RefreshIssuesAsync(preserveCurrentEditor: true))
+        {
+            StatusMessage = GetString("MessageIssueLinkRemoved");
+        }
     }
 
     /// <summary>Adds a parent relationship for an issue moved onto another issue in the tree.</summary>
@@ -661,7 +741,11 @@ public sealed partial class MainWindowViewModel : ObservableObject
             _availableIssues = result.AllIssues;
             RefreshIssueRelationships();
             UpdateTagSuggestions(_tagSuggestionQuery);
-            ClearIssueReferenceSuggestions();
+            if (_issueReferenceSuggestionsActive)
+            {
+                UpdateIssueReferenceSuggestions(_issueReferenceSuggestionPrefix);
+            }
+
             Issues.Synchronize(OrderIssues(result.Matches));
             UpdateNestedIssueState();
 
@@ -831,7 +915,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         var title = IssueTitle;
         var body = IssueBody;
         var priority = ParsePriority(SelectedIssuePriority?.Value);
-        var tags = IssueTags.ToArray();
+        var tags = _explicitTags.ToArray();
         var status = ParseStatus(SelectedIssueStatus?.Value);
         var draft = IsDraft != false;
 
@@ -971,20 +1055,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
             return;
         }
 
-        SearchText = string.Empty;
-        SelectedStatusFilter = StatusFilterOptions[0];
-        SelectedPriorityFilter = PriorityFilterOptions[0];
-        DraftOnly = false;
-
         var issue = await Task.Run(() => service.Create(string.Empty, string.Empty));
         await RefreshIssuesAsync(preserveCurrentEditor: true);
-        var created = Issues.FirstOrDefault(candidate => candidate.Id == issue.Id)?.Issue ?? issue;
-        if (!Issues.Any(candidate => candidate.Id == issue.Id))
-        {
-            Issues.Add(new IssueListItem(created));
-            Issues.RebuildHierarchy();
-        }
-
+        var created = _availableIssues.FirstOrDefault(candidate => candidate.Id == issue.Id) ?? issue;
         LoadIssue(created);
     }
 
@@ -1069,15 +1142,13 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
             IssueTitle = issue?.Title ?? string.Empty;
             IssueBody = issue?.Body ?? string.Empty;
-            IssueTags.Clear();
+            _explicitTags.Clear();
             if (issue is not null)
             {
-                foreach (var tag in issue.Tags)
-                {
-                    IssueTags.Add(tag);
-                }
+                _explicitTags.AddRange(issue.Tags);
             }
 
+            RefreshIssueTags();
             SelectedIssueStatus = issue is null
                 ? IssueStatusOptions[0]
                 : IssueStatusOptions.First(choice =>

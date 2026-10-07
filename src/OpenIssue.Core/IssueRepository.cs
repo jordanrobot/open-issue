@@ -103,6 +103,7 @@ public sealed class IssueRepository(string projectRoot)
         {
             issue.Id = GetNextId();
             ValidateIssue(issue);
+            using var relationshipLock = References(issue).Any() ? AcquireRelationshipLock() : null;
             ValidateReferences(issue, List().Issues);
             var path = GetIssuePath(issue.Id);
             using (AcquireLock(issue.Id.ToString(CultureInfo.InvariantCulture)))
@@ -125,6 +126,13 @@ public sealed class IssueRepository(string projectRoot)
         ValidateIssue(issue);
         EnsureSafeDirectory();
         var path = GetIssuePath(issue.Id);
+        var snapshot = Read(issue.Id);
+        var relationshipsChanged = !snapshot.Parents.SequenceEqual(issue.Parents) ||
+                                   !snapshot.Children.SequenceEqual(issue.Children) ||
+                                   !snapshot.Related.SequenceEqual(issue.Related) ||
+                                   !snapshot.Blocks.SequenceEqual(issue.Blocks) ||
+                                   !snapshot.Dependencies.SequenceEqual(issue.Dependencies);
+        using var relationshipLock = relationshipsChanged ? AcquireRelationshipLock() : null;
         using (AcquireLock(issue.Id.ToString(CultureInfo.InvariantCulture)))
         {
             if (!File.Exists(path))
@@ -139,11 +147,6 @@ public sealed class IssueRepository(string projectRoot)
                 throw new IssueConflictException($"Issue '{issue.Id}' changed since it was read. Reload it and retry.");
             }
 
-            var relationshipsChanged = !current.Parents.SequenceEqual(issue.Parents) ||
-                                       !current.Children.SequenceEqual(issue.Children) ||
-                                       !current.Related.SequenceEqual(issue.Related) ||
-                                       !current.Blocks.SequenceEqual(issue.Blocks);
-            using var relationshipLock = relationshipsChanged ? AcquireRelationshipLock() : null;
             if (relationshipsChanged)
             {
                 var all = List().Issues.Where(existing => existing.Id != issue.Id).ToList();
@@ -168,9 +171,9 @@ public sealed class IssueRepository(string projectRoot)
     }
 
     /// <summary>
-    /// Permanently deletes an issue that is not referenced by another issue.
+    /// Permanently deletes an issue and removes references to it from other issues.
     /// </summary>
-    /// <exception cref="IssueException">The issue is missing, invalid, or referenced by another issue.</exception>
+    /// <exception cref="IssueException">The issue is missing or invalid.</exception>
     public void Delete(long id)
     {
         var path = GetIssuePath(id);
@@ -181,8 +184,8 @@ public sealed class IssueRepository(string projectRoot)
 
         ProjectLocator.RejectLink(_issuesDirectory);
         using (AcquireAllocationLock())
-        using (AcquireLock(id.ToString(CultureInfo.InvariantCulture)))
         using (AcquireRelationshipLock())
+        using (AcquireLock(id.ToString(CultureInfo.InvariantCulture)))
         {
             ProjectLocator.RejectLink(path);
             if (!File.Exists(path))
@@ -201,10 +204,36 @@ public sealed class IssueRepository(string projectRoot)
                 .Select(candidate => candidate.Id)
                 .Order()
                 .ToArray();
-            if (referencingIds.Length > 0)
+            foreach (var referencingId in referencingIds)
             {
-                throw new IssueException(
-                    $"Issue '{id}' is referenced by issue(s) {string.Join(", ", referencingIds)}. Remove those references before deleting it.");
+                var referencingPath = GetIssuePath(referencingId);
+                using (AcquireLock(referencingId.ToString(CultureInfo.InvariantCulture)))
+                {
+                    ProjectLocator.RejectLink(referencingPath);
+                    var referencingIssue = ReadPath(referencingPath);
+                    if (referencingIssue.Id != referencingId)
+                    {
+                        throw new IssueException(
+                            $"Issue file '{referencingPath}' does not contain the expected ID '{referencingId}'.");
+                    }
+
+                    if (!References(referencingIssue).Contains(id))
+                    {
+                        continue;
+                    }
+
+                    referencingIssue.Parents.RemoveAll(reference => reference == id);
+                    referencingIssue.Children.RemoveAll(reference => reference == id);
+                    referencingIssue.Related.RemoveAll(reference => reference == id);
+                    referencingIssue.Blocks.RemoveAll(reference => reference == id);
+                    referencingIssue.Body = IssueBodyLinkParser.RemoveDependency(referencingIssue.Body, id);
+                    referencingIssue.UpdatedAt = DateTimeOffset.UtcNow;
+                    WriteAtomically(
+                        referencingPath,
+                        Serialize(referencingIssue),
+                        overwrite: true,
+                        referencingIssue.Revision);
+                }
             }
 
             AdvanceIdHighWaterMark(id);
@@ -570,7 +599,8 @@ public sealed class IssueRepository(string projectRoot)
         }
 
         if (issue.Parents.Contains(issue.Id) || issue.Children.Contains(issue.Id) ||
-            issue.Related.Contains(issue.Id) || issue.Blocks.Contains(issue.Id))
+            issue.Related.Contains(issue.Id) || issue.Blocks.Contains(issue.Id) ||
+            issue.Dependencies.Contains(issue.Id))
         {
             throw new IssueException("An issue cannot reference itself.");
         }
@@ -592,7 +622,7 @@ public sealed class IssueRepository(string projectRoot)
     private static void ValidateReferences(Issue issue, IReadOnlyCollection<Issue> existing)
     {
         var byId = existing.ToDictionary(item => item.Id);
-        foreach (var reference in issue.Parents.Concat(issue.Children).Concat(issue.Related).Concat(issue.Blocks))
+        foreach (var reference in References(issue))
         {
             ValidateId(reference);
             if (reference != issue.Id && !byId.ContainsKey(reference))
@@ -685,7 +715,7 @@ public sealed class IssueRepository(string projectRoot)
     }
 
     private static IEnumerable<long> References(Issue issue) =>
-        issue.Parents.Concat(issue.Children).Concat(issue.Related).Concat(issue.Blocks);
+        issue.Parents.Concat(issue.Children).Concat(issue.Related).Concat(issue.Blocks).Concat(issue.Dependencies);
 
     private FileStream AcquireLock(string id)
     {

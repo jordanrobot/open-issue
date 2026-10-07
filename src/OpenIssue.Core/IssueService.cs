@@ -15,7 +15,7 @@ public sealed class IssueService(IssueRepository repository)
 
         if (filter?.Tag is { Length: > 0 } tag)
         {
-            issues = issues.Where(issue => issue.Tags.Contains(tag, StringComparer.OrdinalIgnoreCase));
+            issues = issues.Where(issue => issue.EffectiveTags.Contains(tag, StringComparer.OrdinalIgnoreCase));
         }
 
         if (filter?.Priority is { } priority)
@@ -174,6 +174,94 @@ public sealed class IssueService(IssueRepository repository)
             : Edit(idOrPrefix, children: children, expectedRevision: expectedRevision ?? current.Revision);
     }
 
+    /// <summary>Removes a parent relationship from a child issue.</summary>
+    /// <param name="childIdOrPrefix">The child issue ID to update.</param>
+    /// <param name="parentId">The parent issue ID to remove.</param>
+    /// <param name="expectedRevision">The revision the caller edited, when optimistic concurrency is required.</param>
+    /// <returns>The updated child issue.</returns>
+    public Issue RemoveParent(
+        string childIdOrPrefix,
+        long parentId,
+        string? expectedRevision = null)
+    {
+        var child = Resolve(childIdOrPrefix);
+        var parentIdText = parentId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var parent = Resolve(parentIdText);
+        if (child.Id == parent.Id)
+        {
+            throw new IssueException("An issue cannot be its own parent.");
+        }
+
+        var childHasParent = child.Parents.Contains(parent.Id);
+        if (!childHasParent && !parent.Children.Contains(child.Id))
+        {
+            return child;
+        }
+
+        if (childHasParent)
+        {
+            child = Edit(
+                childIdOrPrefix,
+                parents: child.Parents.Where(id => id != parent.Id),
+                expectedRevision: expectedRevision ?? child.Revision);
+        }
+
+        parent = Resolve(parentIdText);
+        if (parent.Children.Contains(child.Id))
+        {
+            Edit(
+                parentIdText,
+                children: parent.Children.Where(id => id != child.Id),
+                expectedRevision: parent.Revision);
+        }
+
+        return Resolve(childIdOrPrefix);
+    }
+
+    /// <summary>Removes a child relationship from a parent issue.</summary>
+    /// <param name="parentIdOrPrefix">The parent issue ID to update.</param>
+    /// <param name="childId">The child issue ID to remove.</param>
+    /// <param name="expectedRevision">The revision the caller edited, when optimistic concurrency is required.</param>
+    /// <returns>The updated parent issue.</returns>
+    public Issue RemoveChild(
+        string parentIdOrPrefix,
+        long childId,
+        string? expectedRevision = null)
+    {
+        var parent = Resolve(parentIdOrPrefix);
+        var childIdText = childId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var child = Resolve(childIdText);
+        if (parent.Id == child.Id)
+        {
+            throw new IssueException("An issue cannot be its own child.");
+        }
+
+        var parentHasChild = parent.Children.Contains(child.Id);
+        if (!parentHasChild && !child.Parents.Contains(parent.Id))
+        {
+            return parent;
+        }
+
+        if (parentHasChild)
+        {
+            parent = Edit(
+                parentIdOrPrefix,
+                children: parent.Children.Where(id => id != child.Id),
+                expectedRevision: expectedRevision ?? parent.Revision);
+        }
+
+        child = Resolve(childIdText);
+        if (child.Parents.Contains(parent.Id))
+        {
+            Edit(
+                childIdText,
+                parents: child.Parents.Where(id => id != parent.Id),
+                expectedRevision: child.Revision);
+        }
+
+        return Resolve(parentIdOrPrefix);
+    }
+
     /// <summary>Moves an issue under a different parent, removing its previous parent links.</summary>
     /// <param name="childIdOrPrefix">The issue being moved.</param>
     /// <param name="parentId">The new parent issue ID.</param>
@@ -250,7 +338,7 @@ public sealed class IssueService(IssueRepository repository)
         return List(filter).Issues.Where(issue =>
                 terms.All(term => issue.Title.Contains(term, StringComparison.OrdinalIgnoreCase) ||
                                   issue.Body.Contains(term, StringComparison.OrdinalIgnoreCase) ||
-                                  issue.Tags.Any(tag => tag.Contains(term, StringComparison.OrdinalIgnoreCase))))
+                                  issue.EffectiveTags.Any(tag => tag.Contains(term, StringComparison.OrdinalIgnoreCase))))
             .ToArray();
     }
 

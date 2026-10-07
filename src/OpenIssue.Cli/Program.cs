@@ -564,7 +564,7 @@ internal static class Cli
     }
 
     private static string FormatIssue(Issue issue) =>
-        $"{issue.Title}\nID: {issue.Id}\nStatus: {issue.Status.ToString().ToLowerInvariant()}\nDraft: {issue.Draft}\nPriority: {issue.Priority.ToString().ToLowerInvariant()}\nParents: {string.Join(", ", issue.Parents)}\nChildren: {string.Join(", ", issue.Children)}\nTags: {string.Join(", ", issue.Tags)}\n\n{issue.Body}";
+        $"{issue.Title}\nID: {issue.Id}\nStatus: {issue.Status.ToString().ToLowerInvariant()}\nDraft: {issue.Draft}\nPriority: {issue.Priority.ToString().ToLowerInvariant()}\nParents: {string.Join(", ", issue.Parents)}\nChildren: {string.Join(", ", issue.Children)}\nTags: {string.Join(", ", issue.EffectiveTags)}\n\n{issue.Body}";
 
     private static void PrintDiagnostics(IEnumerable<IssueDiagnostic> diagnostics)
     {

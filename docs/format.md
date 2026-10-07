@@ -63,6 +63,8 @@ Document the public API for consumers.
 
 New issues start as drafts (`draft: true`) with an empty title and body by default. A draft may keep an empty title while it is being authored; a title is required before marking it ready. Schema 2 files with `ready` are read with the inverse value and upgraded to schema 3 on their next write. In the desktop editor, unchecking Draft marks an issue ready. Issue bodies are freeform Markdown; no headings, sections, or body content are required. Readiness is independent of status; `next` selects only open, ready, unblocked issues. Readiness authorizes selection by `next`, not autonomous implementation.
 
+Inline body tags use `#tag`, where the tag starts with a letter or underscore and may continue with letters, digits, underscores, or hyphens. A numeric token such as `#123` is an issue reference, not a tag. Inline tags remain in the Markdown body and are combined with frontmatter `tags` for display, search, and filtering; they are not copied into frontmatter.
+
 New issues record the creating operating-system username in `created_by`; existing issues without that field have unknown attribution. The desktop editor shows the creator plus creation and last-edit timestamps in the system's local time zone, with the offset displayed. Timestamps remain UTC ISO 8601 in frontmatter.
 
 ## Reads and writes

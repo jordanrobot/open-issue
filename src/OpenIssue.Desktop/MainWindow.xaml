@@ -10,6 +10,18 @@
             <Thickness x:Key="TreeViewItemPresenterMargin">4,0</Thickness>
             <Thickness x:Key="TreeViewItemPresenterPadding">0</Thickness>
             <x:Double x:Key="TreeViewItemMinHeight">28</x:Double>
+            <Style x:Key="IssueBodyTagHighlightStyle" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource AccentFillColorTertiaryBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource ControlStrokeColorDefaultBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+            </Style>
+            <Style x:Key="MarkdownToolbarAppBarButtonStyle" TargetType="AppBarButton">
+                <Setter Property="Width" Value="36" />
+                <Setter Property="Height" Value="40" />
+                <Setter Property="MinWidth" Value="36" />
+                <Setter Property="MinHeight" Value="40" />
+                <Setter Property="Padding" Value="0" />
+            </Style>
         </Grid.Resources>
         <Grid.ColumnDefinitions>
             <ColumnDefinition x:Name="IssueListColumn" Width="360" MinWidth="320" />
@@ -139,7 +151,6 @@
                         DragItemsCompleted="IssueList_DragItemsCompleted"
                         DragOver="IssueList_DragOver"
                         Background="Transparent"
-                        ToolTipService.ToolTip="{x:Bind ViewModel.IssueListDragDropDescription, Mode=OneTime}"
                         AutomationProperties.HelpText="{x:Bind ViewModel.IssueListDragDropDescription, Mode=OneTime}"
                         AutomationProperties.AutomationId="IssueList"
                         AutomationProperties.Name="{x:Bind ViewModel.IssueListAutomationName, Mode=OneTime}">
@@ -347,39 +358,175 @@
                     TextChanged="Editor_Changed"
                     IsEnabled="{x:Bind ViewModel.IsEditorEnabled, Mode=OneWay}"
                     AutomationProperties.AutomationId="IssueTitle" />
-                <ListView
-                    x:Name="IssueReferenceSuggestionsList"
+                <CommandBar
+                    x:Name="MarkdownFormattingCommandBar"
+                    x:Uid="MarkdownFormattingCommandBar"
                     Grid.Row="2"
-                    Margin="0,0,0,8"
-                    MaxHeight="144"
-                    SelectionMode="Single"
-                    IsItemClickEnabled="True"
-                    ItemsSource="{x:Bind ViewModel.IssueReferenceSuggestions, Mode=OneWay}"
-                    ItemClick="IssueReferenceSuggestionsList_ItemClick"
-                    Visibility="{x:Bind local:MainWindow.SuggestionVisibility(ViewModel.HasIssueReferenceSuggestions), Mode=OneWay}"
-                    AutomationProperties.AutomationId="IssueReferenceSuggestions"
-                    AutomationProperties.Name="{x:Bind ViewModel.IssueReferenceSuggestionsAutomationName, Mode=OneTime}">
-                    <ListView.ItemTemplate>
-                        <DataTemplate x:DataType="local:IssueListItem">
-                            <TextBlock
-                                Text="{x:Bind local:MainWindowViewModel.FormatIssueLabel(Id, Title), Mode=OneWay}"
-                                TextTrimming="CharacterEllipsis" />
-                        </DataTemplate>
-                    </ListView.ItemTemplate>
-                </ListView>
-                <TextBox
-                    x:Name="BodyBox"
-                    x:Uid="BodyBox"
-                    Grid.Row="3"
-                    AcceptsReturn="True"
-                    TextWrapping="Wrap"
-                    ScrollViewer.VerticalScrollBarVisibility="Auto"
-                    ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                    Text="{x:Bind ViewModel.IssueBody, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                    TextChanged="BodyBox_TextChanged"
-                    KeyDown="BodyBox_KeyDown"
+                    DefaultLabelPosition="Collapsed"
+                    HorizontalAlignment="Left"
+                    Padding="0"
                     IsEnabled="{x:Bind ViewModel.IsEditorEnabled, Mode=OneWay}"
-                    AutomationProperties.AutomationId="IssueBody" />
+                    AutomationProperties.AutomationId="MarkdownFormattingCommandBar">
+                    <CommandBar.PrimaryCommands>
+                        <AppBarButton
+                            x:Uid="MarkdownUndoButton"
+                            Style="{StaticResource MarkdownToolbarAppBarButtonStyle}"
+                            IsEnabled="False"
+                            AutomationProperties.AutomationId="MarkdownUndoButton">
+                            <AppBarButton.Icon>
+                                <FontIcon
+                                    Glyph="&#xE7A7;"
+                                    FontFamily="{ThemeResource SymbolThemeFontFamily}" />
+                            </AppBarButton.Icon>
+                        </AppBarButton>
+                        <AppBarButton
+                            x:Uid="MarkdownRedoButton"
+                            Style="{StaticResource MarkdownToolbarAppBarButtonStyle}"
+                            IsEnabled="False"
+                            AutomationProperties.AutomationId="MarkdownRedoButton">
+                            <AppBarButton.Icon>
+                                <FontIcon
+                                    Glyph="&#xE7A6;"
+                                    FontFamily="{ThemeResource SymbolThemeFontFamily}" />
+                            </AppBarButton.Icon>
+                        </AppBarButton>
+                        <AppBarSeparator Width="8" />
+                        <AppBarButton
+                            x:Uid="MarkdownHeadingButton"
+                            Style="{StaticResource MarkdownToolbarAppBarButtonStyle}"
+                            Click="MarkdownHeading_Click"
+                            AutomationProperties.AutomationId="MarkdownHeadingButton">
+                            <AppBarButton.Icon>
+                                <FontIcon
+                                    Glyph="H"
+                                    FontSize="16"
+                                    FontWeight="SemiBold"
+                                    FontFamily="Segoe UI" />
+                            </AppBarButton.Icon>
+                        </AppBarButton>
+                        <AppBarButton
+                            x:Uid="MarkdownBoldButton"
+                            Style="{StaticResource MarkdownToolbarAppBarButtonStyle}"
+                            Click="MarkdownBold_Click"
+                            AutomationProperties.AutomationId="MarkdownBoldButton">
+                            <AppBarButton.Icon>
+                                <FontIcon
+                                    Glyph="B"
+                                    FontSize="16"
+                                    FontWeight="Bold"
+                                    FontFamily="Segoe UI" />
+                            </AppBarButton.Icon>
+                        </AppBarButton>
+                        <AppBarButton
+                            x:Uid="MarkdownItalicButton"
+                            Style="{StaticResource MarkdownToolbarAppBarButtonStyle}"
+                            Click="MarkdownItalic_Click"
+                            AutomationProperties.AutomationId="MarkdownItalicButton">
+                            <AppBarButton.Icon>
+                                <FontIcon
+                                    Glyph="I"
+                                    FontSize="16"
+                                    FontStyle="Italic"
+                                    FontFamily="Segoe UI" />
+                            </AppBarButton.Icon>
+                        </AppBarButton>
+                        <AppBarButton
+                            x:Uid="MarkdownLinkButton"
+                            Style="{StaticResource MarkdownToolbarAppBarButtonStyle}"
+                            Click="MarkdownLink_Click"
+                            AutomationProperties.AutomationId="MarkdownLinkButton">
+                            <AppBarButton.Icon>
+                                <FontIcon
+                                    Glyph="&#xE71B;"
+                                    FontFamily="{ThemeResource SymbolThemeFontFamily}" />
+                            </AppBarButton.Icon>
+                        </AppBarButton>
+                        <AppBarSeparator Width="8" />
+                        <AppBarButton
+                            x:Uid="MarkdownBulletedListButton"
+                            Style="{StaticResource MarkdownToolbarAppBarButtonStyle}"
+                            Click="MarkdownBulletedList_Click"
+                            AutomationProperties.AutomationId="MarkdownBulletedListButton">
+                            <AppBarButton.Icon>
+                                <FontIcon
+                                    Glyph="&#xE8FD;"
+                                    FontFamily="{ThemeResource SymbolThemeFontFamily}" />
+                            </AppBarButton.Icon>
+                        </AppBarButton>
+                        <AppBarButton
+                            x:Uid="MarkdownNumberedListButton"
+                            Style="{StaticResource MarkdownToolbarAppBarButtonStyle}"
+                            Click="MarkdownNumberedList_Click"
+                            AutomationProperties.AutomationId="MarkdownNumberedListButton">
+                            <AppBarButton.Icon>
+                                <PathIcon
+                                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                    Data="M2,0 L4,0 L4,4.4 L5,4.4 L5,5.2 L1,5.2 L1,4.4 L2.7,4.4 L2.7,1.6 L1.6,2.5 L1,1.7 Z
+                                          M0.7,6.6 C0.7,5.7 1.5,5.3 2.9,5.3 C4.3,5.3 5.1,6.1 5.1,7.1 C5.1,7.9 4.6,8.4 3.8,9.1 L2,10.5 L5.2,10.5 L5.2,11.3 L0.6,11.3 L0.6,10.4 L3.1,8.2 C3.7,7.7 3.9,7.4 3.9,7 C3.9,6.5 3.6,6.2 2.9,6.2 C2.2,6.2 1.8,6.5 1.8,7.1 Z
+                                          M0.8,12.2 L1.2,11.5 L3.4,11.5 C4.6,11.5 5.2,12.1 5.2,13 C5.2,13.6 4.9,14 4.3,14.2 C5,14.4 5.4,14.9 5.4,15.5 C5.4,16.4 4.6,17 3.3,17 L1.2,17 L0.7,16.2 L3.2,16.2 C3.8,16.2 4.1,16 4.1,15.6 C4.1,15.2 3.8,15 3.1,15 L1.8,15 L1.8,14 L3.1,14 C3.7,14 4,13.8 4,13.3 C4,12.9 3.7,12.7 3.1,12.7 L0.8,12.7 Z
+                                          M7,2.1 L16,2.1 L16,3.1 L7,3.1 Z
+                                          M7,8.1 L16,8.1 L16,9.1 L7,9.1 Z
+                                          M7,14 L16,14 L16,15 L7,15 Z" />
+                            </AppBarButton.Icon>
+                        </AppBarButton>
+                        <AppBarButton
+                            x:Uid="MarkdownCheckboxListButton"
+                            Style="{StaticResource MarkdownToolbarAppBarButtonStyle}"
+                            Click="MarkdownCheckboxList_Click"
+                            AutomationProperties.AutomationId="MarkdownCheckboxListButton">
+                            <AppBarButton.Icon>
+                                <FontIcon
+                                    Glyph="&#xE739;"
+                                    FontFamily="{ThemeResource SymbolThemeFontFamily}" />
+                            </AppBarButton.Icon>
+                        </AppBarButton>
+                        <AppBarSeparator Width="8" />
+                        <AppBarButton
+                            x:Uid="MarkdownIndentButton"
+                            Style="{StaticResource MarkdownToolbarAppBarButtonStyle}"
+                            Click="MarkdownIndent_Click"
+                            AutomationProperties.AutomationId="MarkdownIndentButton">
+                            <AppBarButton.Icon>
+                                <FontIcon
+                                    Glyph="&#xE8E3;"
+                                    FontFamily="{ThemeResource SymbolThemeFontFamily}" />
+                            </AppBarButton.Icon>
+                        </AppBarButton>
+                        <AppBarButton
+                            x:Uid="MarkdownOutdentButton"
+                            Style="{StaticResource MarkdownToolbarAppBarButtonStyle}"
+                            Click="MarkdownOutdent_Click"
+                            AutomationProperties.AutomationId="MarkdownOutdentButton">
+                            <AppBarButton.Icon>
+                                <FontIcon
+                                    Glyph="&#xE8E2;"
+                                    FontFamily="{ThemeResource SymbolThemeFontFamily}" />
+                            </AppBarButton.Icon>
+                        </AppBarButton>
+                    </CommandBar.PrimaryCommands>
+                </CommandBar>
+                <Grid Grid.Row="3">
+                    <Canvas
+                        x:Name="BodyHighlightCanvas"
+                        IsHitTestVisible="False" />
+                    <TextBox
+                        x:Name="BodyBox"
+                        x:Uid="BodyBox"
+                        AcceptsReturn="True"
+                        TextWrapping="Wrap"
+                        Background="Transparent"
+                        ScrollViewer.VerticalScrollBarVisibility="Auto"
+                        ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                        Text="{x:Bind ViewModel.IssueBody, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                        TextChanged="BodyBox_TextChanged"
+                        SelectionChanged="BodyBox_SelectionChanged"
+                        PreviewKeyDown="BodyBox_KeyDown"
+                        Loaded="BodyBox_Loaded"
+                        ActualThemeChanged="BodyBox_ActualThemeChanged"
+                        SizeChanged="BodyBox_SizeChanged"
+                        IsEnabled="{x:Bind ViewModel.IsEditorEnabled, Mode=OneWay}"
+                        AutomationProperties.AutomationId="IssueBody" />
+                </Grid>
                 <StackPanel
                     Grid.Row="4"
                     Margin="0,12,0,0"
@@ -519,19 +666,20 @@
                                 <DataTemplate x:DataType="x:String">
                                     <Button
                                         x:Uid="TagPill"
-                                        Padding="8,2"
-                                        MinHeight="28"
+                                        Margin="0,2"
+                                        Padding="5,1"
+                                        MinHeight="24"
                                         HorizontalAlignment="Left"
                                         Background="{ThemeResource AccentFillColorTertiaryBrush}"
-                                        BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                                        BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
                                         BorderThickness="1"
-                                        CornerRadius="14"
+                                        CornerRadius="12"
                                         Click="TagPill_Click"
                                         Tag="{x:Bind}"
                                         AutomationProperties.Name="{x:Bind}">
                                         <StackPanel
                                             Orientation="Horizontal"
-                                            Spacing="6">
+                                            Spacing="4">
                                             <TextBlock Text="{x:Bind}" />
                                             <FontIcon
                                                 Glyph="&#xE711;"
@@ -552,94 +700,162 @@
                             IsEnabled="{x:Bind ViewModel.IsEditorEnabled, Mode=OneWay}"
                             AutomationProperties.AutomationId="IssueTagsInput" />
                     </StackPanel>
-                    <StackPanel Spacing="8">
-                        <Grid ColumnSpacing="8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
+                    <Border
+                        x:Name="ParentIssuesDropTarget"
+                        x:Uid="ParentIssuesDropTarget"
+                        AllowDrop="True"
+                        Background="Transparent"
+                        BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                        BorderThickness="0"
+                        CornerRadius="8"
+                        DragOver="ParentIssuesDropTarget_DragOver"
+                        DragLeave="IssueRelationshipDropTarget_DragLeave"
+                        Drop="ParentIssuesDropTarget_Drop"
+                        AutomationProperties.AutomationId="ParentIssuesDropTarget">
+                        <StackPanel Spacing="8">
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock
+                                    x:Uid="ParentIssuesHeading"
+                                    FontWeight="SemiBold"
+                                    VerticalAlignment="Center" />
+                                <Button
+                                    x:Name="AddParentIssuesButton"
+                                    x:Uid="AddParentIssuesButton"
+                                    Grid.Column="1"
+                                    Click="AddParentIssuesButton_Click"
+                                    IsEnabled="{x:Bind ViewModel.IsEditorEnabled, Mode=OneWay}"
+                                    AutomationProperties.AutomationId="AddParentIssuesButton" />
+                            </Grid>
                             <TextBlock
-                                x:Uid="ParentIssuesHeading"
-                                FontWeight="SemiBold"
-                                VerticalAlignment="Center" />
-                            <Button
-                                x:Name="AddParentIssuesButton"
-                                x:Uid="AddParentIssuesButton"
-                                Grid.Column="1"
-                                Click="AddParentIssuesButton_Click"
-                                IsEnabled="{x:Bind ViewModel.IsEditorEnabled, Mode=OneWay}"
-                                AutomationProperties.AutomationId="AddParentIssuesButton" />
-                        </Grid>
-                        <TextBlock
-                            Text="{x:Bind ViewModel.NoIssueRelationshipsText, Mode=OneTime}"
-                            Style="{StaticResource CaptionTextBlockStyle}"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Visibility="{x:Bind local:MainWindow.EmptyRelationshipVisibility(ViewModel.HasParentIssueLinks), Mode=OneWay}" />
-                        <ItemsControl
-                            ItemsSource="{x:Bind ViewModel.ParentIssueLinks, Mode=OneWay}"
-                            Visibility="{x:Bind local:MainWindow.RelationshipItemsVisibility(ViewModel.HasParentIssueLinks), Mode=OneWay}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate x:DataType="local:IssueRelationshipLink">
-                                    <Button
-                                        x:Uid="RelatedIssueButton"
-                                        Padding="8,4"
-                                        HorizontalAlignment="Left"
-                                        Background="{ThemeResource AccentFillColorTertiaryBrush}"
-                                        BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
-                                        BorderThickness="1"
-                                        CornerRadius="12"
-                                        Content="{x:Bind Label, Mode=OneTime}"
-                                        Tag="{x:Bind Id, Mode=OneTime}"
-                                        Click="RelatedIssue_Click"
-                                        AutomationProperties.Name="{x:Bind Label, Mode=OneTime}" />
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </StackPanel>
-                    <StackPanel Spacing="8">
-                        <Grid ColumnSpacing="8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
+                                Text="{x:Bind ViewModel.NoIssueRelationshipsText, Mode=OneTime}"
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Visibility="{x:Bind local:MainWindow.EmptyRelationshipVisibility(ViewModel.HasParentIssueLinks), Mode=OneWay}" />
+                            <ItemsControl
+                                ItemsSource="{x:Bind ViewModel.ParentIssueLinks, Mode=OneWay}"
+                                Visibility="{x:Bind local:MainWindow.RelationshipItemsVisibility(ViewModel.HasParentIssueLinks), Mode=OneWay}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="local:IssueRelationshipLink">
+                                        <StackPanel Orientation="Horizontal" Spacing="4">
+                                            <Button
+                                                x:Uid="RelatedIssueButton"
+                                                Margin="0,2"
+                                                Padding="5,2"
+                                                MinHeight="24"
+                                                HorizontalAlignment="Left"
+                                                Background="{ThemeResource AccentFillColorTertiaryBrush}"
+                                                BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="12"
+                                                Content="{x:Bind Label, Mode=OneTime}"
+                                                Tag="{x:Bind Id, Mode=OneTime}"
+                                                Click="RelatedIssue_Click"
+                                                AutomationProperties.Name="{x:Bind Label, Mode=OneTime}" />
+                                            <Button
+                                                x:Uid="RemoveParentRelationshipButton"
+                                                Width="24"
+                                                Height="24"
+                                                MinWidth="24"
+                                                MinHeight="24"
+                                                Padding="0"
+                                                Tag="{x:Bind Id, Mode=OneTime}"
+                                                Click="RemoveParentRelationshipButton_Click"
+                                                ToolTipService.ToolTip="{x:Bind local:MainWindow.FormatParentRelationshipRemovalName(Label), Mode=OneTime}"
+                                                AutomationProperties.Name="{x:Bind local:MainWindow.FormatParentRelationshipRemovalName(Label), Mode=OneTime}"
+                                                AutomationProperties.AutomationId="{x:Bind local:MainWindow.ParentRelationshipRemovalAutomationId(Id), Mode=OneTime}">
+                                                <FontIcon
+                                                    Glyph="&#xE711;"
+                                                    FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                                                    FontSize="10" />
+                                            </Button>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
+                    <Border
+                        x:Name="ChildIssuesDropTarget"
+                        x:Uid="ChildIssuesDropTarget"
+                        AllowDrop="True"
+                        Background="Transparent"
+                        BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                        BorderThickness="0"
+                        CornerRadius="8"
+                        DragOver="ChildIssuesDropTarget_DragOver"
+                        DragLeave="IssueRelationshipDropTarget_DragLeave"
+                        Drop="ChildIssuesDropTarget_Drop"
+                        AutomationProperties.AutomationId="ChildIssuesDropTarget">
+                        <StackPanel Spacing="8">
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock
+                                    x:Uid="ChildIssuesHeading"
+                                    FontWeight="SemiBold"
+                                    VerticalAlignment="Center" />
+                                <Button
+                                    x:Name="AddChildIssuesButton"
+                                    x:Uid="AddChildIssuesButton"
+                                    Grid.Column="1"
+                                    Click="AddChildIssuesButton_Click"
+                                    IsEnabled="{x:Bind ViewModel.IsEditorEnabled, Mode=OneWay}"
+                                    AutomationProperties.AutomationId="AddChildIssuesButton" />
+                            </Grid>
                             <TextBlock
-                                x:Uid="ChildIssuesHeading"
-                                FontWeight="SemiBold"
-                                VerticalAlignment="Center" />
-                            <Button
-                                x:Name="AddChildIssuesButton"
-                                x:Uid="AddChildIssuesButton"
-                                Grid.Column="1"
-                                Click="AddChildIssuesButton_Click"
-                                IsEnabled="{x:Bind ViewModel.IsEditorEnabled, Mode=OneWay}"
-                                AutomationProperties.AutomationId="AddChildIssuesButton" />
-                        </Grid>
-                        <TextBlock
-                            Text="{x:Bind ViewModel.NoIssueRelationshipsText, Mode=OneTime}"
-                            Style="{StaticResource CaptionTextBlockStyle}"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Visibility="{x:Bind local:MainWindow.EmptyRelationshipVisibility(ViewModel.HasChildIssueLinks), Mode=OneWay}" />
-                        <ItemsControl
-                            ItemsSource="{x:Bind ViewModel.ChildIssueLinks, Mode=OneWay}"
-                            Visibility="{x:Bind local:MainWindow.RelationshipItemsVisibility(ViewModel.HasChildIssueLinks), Mode=OneWay}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate x:DataType="local:IssueRelationshipLink">
-                                    <Button
-                                        x:Uid="RelatedIssueButton"
-                                        Padding="8,4"
-                                        HorizontalAlignment="Left"
-                                        Background="{ThemeResource AccentFillColorTertiaryBrush}"
-                                        BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
-                                        BorderThickness="1"
-                                        CornerRadius="12"
-                                        Content="{x:Bind Label, Mode=OneTime}"
-                                        Tag="{x:Bind Id, Mode=OneTime}"
-                                        Click="RelatedIssue_Click"
-                                        AutomationProperties.Name="{x:Bind Label, Mode=OneTime}" />
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </StackPanel>
+                                Text="{x:Bind ViewModel.NoIssueRelationshipsText, Mode=OneTime}"
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Visibility="{x:Bind local:MainWindow.EmptyRelationshipVisibility(ViewModel.HasChildIssueLinks), Mode=OneWay}" />
+                            <ItemsControl
+                                ItemsSource="{x:Bind ViewModel.ChildIssueLinks, Mode=OneWay}"
+                                Visibility="{x:Bind local:MainWindow.RelationshipItemsVisibility(ViewModel.HasChildIssueLinks), Mode=OneWay}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="local:IssueRelationshipLink">
+                                        <StackPanel Orientation="Horizontal" Spacing="4">
+                                            <Button
+                                                x:Uid="RelatedIssueButton"
+                                                Margin="0,2"
+                                                Padding="5,2"
+                                                MinHeight="24"
+                                                HorizontalAlignment="Left"
+                                                Background="{ThemeResource AccentFillColorTertiaryBrush}"
+                                                BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="12"
+                                                Content="{x:Bind Label, Mode=OneTime}"
+                                                Tag="{x:Bind Id, Mode=OneTime}"
+                                                Click="RelatedIssue_Click"
+                                                AutomationProperties.Name="{x:Bind Label, Mode=OneTime}" />
+                                            <Button
+                                                x:Uid="RemoveChildRelationshipButton"
+                                                Width="24"
+                                                Height="24"
+                                                MinWidth="24"
+                                                MinHeight="24"
+                                                Padding="0"
+                                                Tag="{x:Bind Id, Mode=OneTime}"
+                                                Click="RemoveChildRelationshipButton_Click"
+                                                ToolTipService.ToolTip="{x:Bind local:MainWindow.FormatChildRelationshipRemovalName(Label), Mode=OneTime}"
+                                                AutomationProperties.Name="{x:Bind local:MainWindow.FormatChildRelationshipRemovalName(Label), Mode=OneTime}"
+                                                AutomationProperties.AutomationId="{x:Bind local:MainWindow.ChildRelationshipRemovalAutomationId(Id), Mode=OneTime}">
+                                                <FontIcon
+                                                    Glyph="&#xE711;"
+                                                    FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                                                    FontSize="10" />
+                                            </Button>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
             </ScrollViewer>
         </Border>
@@ -671,5 +887,34 @@
                     FontSize="14" />
             </Button>
         </Border>
+        <Popup
+            x:Name="IssueReferenceSuggestionsPopup"
+            IsOpen="{x:Bind ViewModel.HasIssueReferenceSuggestions, Mode=OneWay}">
+            <Border
+                Width="320"
+                MaxHeight="144"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="6">
+                <ListView
+                    x:Name="IssueReferenceSuggestionsList"
+                    MaxHeight="142"
+                    SelectionMode="Single"
+                    IsItemClickEnabled="True"
+                    ItemsSource="{x:Bind ViewModel.IssueReferenceSuggestions, Mode=OneWay}"
+                    ItemClick="IssueReferenceSuggestionsList_ItemClick"
+                    AutomationProperties.AutomationId="IssueReferenceSuggestions"
+                    AutomationProperties.Name="{x:Bind ViewModel.IssueReferenceSuggestionsAutomationName, Mode=OneTime}">
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="local:IssueListItem">
+                            <TextBlock
+                                Text="{x:Bind local:MainWindowViewModel.FormatIssueLabel(Id, Title), Mode=OneWay}"
+                                TextTrimming="CharacterEllipsis" />
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </Border>
+        </Popup>
     </Grid>
 </Window>
