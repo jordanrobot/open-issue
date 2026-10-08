@@ -74,9 +74,16 @@ public sealed partial class MainWindowViewModel : ObservableObject
             new("low", GetString("PriorityLow"))
         ];
         IssuePriorityOptions = PriorityFilterOptions.Skip(1).ToArray();
+        IssueListViewOptions =
+        [
+            new(IssueListViewMode.Relationships, GetString("IssueListViewRelationships")),
+            new(IssueListViewMode.Tags, GetString("IssueListViewTags")),
+            new(IssueListViewMode.Dependencies, GetString("IssueListViewDependencies"))
+        ];
 
         SelectedStatusFilter = StatusFilterOptions[1];
         SelectedPriorityFilter = PriorityFilterOptions[0];
+        SelectedIssueListView = IssueListViewOptions[0];
         SelectedIssueStatus = IssueStatusOptions[0];
         SelectedIssuePriority = IssuePriorityOptions.First(choice => choice.Value == "normal");
     }
@@ -110,6 +117,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public IssueListItem? SelectedIssueListItem =>
         Issues.FirstOrDefault(row => row.Id == SelectedIssue?.Id);
 
+    /// <summary>Gets the visible tree node corresponding to the selected issue snapshot.</summary>
+    public IssueListNode? SelectedIssueListNode =>
+        SelectedIssue is { } issue ? Issues.FindNode(issue.Id) : null;
+
     public IReadOnlyList<FilterChoice> StatusFilterOptions { get; }
 
     public IReadOnlyList<FilterChoice> IssueStatusOptions { get; }
@@ -117,6 +128,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public IReadOnlyList<FilterChoice> PriorityFilterOptions { get; }
 
     public IReadOnlyList<FilterChoice> IssuePriorityOptions { get; }
+
+    public IReadOnlyList<IssueListViewChoice> IssueListViewOptions { get; }
 
     public Func<Issue, Task<IssueConflictResolution>>? ResolveConflictAsync { get; set; }
 
@@ -136,7 +149,13 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     public string IssueListAutomationName => GetString("IssueListName");
 
-    public string IssueListDragDropDescription => GetString("IssueListDragDropDescription");
+    public string IssueListDragDropDescription => GetString(
+        CanReorderIssueList
+            ? "IssueListDragDropDescription"
+            : "IssueListDragDropDisabledDescription");
+
+    public bool CanReorderIssueList =>
+        SelectedIssueListView?.Mode == IssueListViewMode.Relationships;
 
     public string IssueListSplitterAutomationName => GetString("IssueListSplitterName");
 
@@ -158,6 +177,40 @@ public sealed partial class MainWindowViewModel : ObservableObject
             SharedResources.GetString("IssueListEntryFormat"),
             id,
             title);
+
+    /// <summary>Formats an issue row or group heading for display and UI Automation.</summary>
+    /// <param name="row">The issue row, or <see langword="null"/> for a group heading.</param>
+    /// <param name="groupKind">The kind of group represented by the node.</param>
+    /// <param name="groupIssueId">The prerequisite issue ID for dependency groups.</param>
+    /// <param name="title">The issue title or raw group heading text.</param>
+    /// <returns>A localized display label for the node.</returns>
+    public static string FormatIssueListNodeLabel(
+        IssueListItem? row,
+        IssueListGroupKind groupKind,
+        long? groupIssueId,
+        string title)
+    {
+        if (row is not null)
+        {
+            return FormatIssueLabel(row.Id, row.Title);
+        }
+
+        return groupKind switch
+        {
+            IssueListGroupKind.Tag => title,
+            IssueListGroupKind.Dependency when groupIssueId is long dependencyId &&
+                                               !string.IsNullOrWhiteSpace(title) =>
+                FormatIssueLabel(dependencyId, title),
+            IssueListGroupKind.Dependency when groupIssueId is long missingId =>
+                string.Format(
+                    CultureInfo.CurrentCulture,
+                    SharedResources.GetString("IssueListMissingDependencyFormat"),
+                    missingId),
+            IssueListGroupKind.NoTags => SharedResources.GetString("IssueListNoTagsGroup"),
+            IssueListGroupKind.NoDependencies => SharedResources.GetString("IssueListNoDependenciesGroup"),
+            _ => title
+        };
+    }
 
     public bool IsDirty =>
         SelectedIssue is not null &&
@@ -192,6 +245,11 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public partial FilterChoice? SelectedPriorityFilter { get; set; }
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanReorderIssueList))]
+    [NotifyPropertyChangedFor(nameof(IssueListDragDropDescription))]
+    public partial IssueListViewChoice? SelectedIssueListView { get; set; }
+
+    [ObservableProperty]
     public partial bool DraftOnly { get; set; }
 
     [ObservableProperty]
@@ -200,6 +258,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(IsDeleteEnabled))]
     [NotifyPropertyChangedFor(nameof(MetadataText))]
     [NotifyPropertyChangedFor(nameof(SelectedIssueListItem))]
+    [NotifyPropertyChangedFor(nameof(SelectedIssueListNode))]
     public partial Issue? SelectedIssue { get; set; }
 
     [ObservableProperty]
@@ -211,6 +270,16 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public partial string IssueBody { get; set; }
 
     partial void OnIssueBodyChanged(string value) => RefreshIssueTags();
+
+    partial void OnSelectedIssueListViewChanged(IssueListViewChoice? value)
+    {
+        if (value is not null)
+        {
+            Issues.SetViewMode(value.Mode);
+        }
+
+        OnPropertyChanged(nameof(SelectedIssueListNode));
+    }
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsDirty))]
@@ -762,7 +831,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 UpdateIssueReferenceSuggestions(_issueReferenceSuggestionPrefix);
             }
 
-            Issues.Synchronize(OrderIssues(result.Matches));
+            Issues.Synchronize(OrderIssues(result.Matches), result.AllIssues);
             UpdateNestedIssueState();
 
             var selected = currentId is null
@@ -779,6 +848,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 LoadIssue(selected ?? Issues.FirstOrDefault()?.Issue);
             }
 
+            OnPropertyChanged(nameof(SelectedIssueListNode));
             StatusMessage = result.Listed.Diagnostics.Count == 0
                 ? Format("MessageLoadedIssuesFormat", Issues.Count)
                 : string.Join(
@@ -864,6 +934,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
     /// <param name="issueId">The issue whose ancestors should be expanded.</param>
     public void ExpandIssueAncestors(long issueId)
     {
+        if (Issues.ViewMode != IssueListViewMode.Relationships)
+        {
+            Issues.ExpandIssueGroup(issueId);
+            return;
+        }
+
         var issue = _availableIssues.FirstOrDefault(candidate => candidate.Id == issueId)
             ?? Issues.FirstOrDefault(row => row.Id == issueId)?.Issue;
         if (issue is null)
@@ -1228,6 +1304,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         existing.Update(issue);
         Issues.RebuildHierarchy();
         UpdateNestedIssueState();
+        OnPropertyChanged(nameof(SelectedIssueListNode));
     }
 
     private void UpdateNestedIssueState()

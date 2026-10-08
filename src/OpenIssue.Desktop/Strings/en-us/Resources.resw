@@ -51,11 +51,35 @@
   <data name="IssueFiltersExpander.Header" xml:space="preserve">
     <value>Filters</value>
   </data>
+  <data name="IssueListViewModePicker.Header" xml:space="preserve">
+    <value>View issues by</value>
+  </data>
+  <data name="IssueListViewModePicker.AutomationProperties.Name" xml:space="preserve">
+    <value>View issues by</value>
+  </data>
+  <data name="IssueListViewModePicker.ToolTipService.ToolTip" xml:space="preserve">
+    <value>Choose how to group the issue list</value>
+  </data>
+  <data name="IssueListViewRelationships" xml:space="preserve">
+    <value>Parent / child</value>
+  </data>
+  <data name="IssueListViewTags" xml:space="preserve">
+    <value>Tags</value>
+  </data>
+  <data name="IssueListViewDependencies" xml:space="preserve">
+    <value>Depends on</value>
+  </data>
   <data name="IssueListEmptyTitle.Text" xml:space="preserve">
     <value>No issues to show</value>
   </data>
   <data name="IssueListEmptyDescription.Text" xml:space="preserve">
     <value>Try a different search or filter, or choose New issue to create one.</value>
+  </data>
+  <data name="IssueListNoTagsGroup" xml:space="preserve">
+    <value>No tags</value>
+  </data>
+  <data name="IssueListNoDependenciesGroup" xml:space="preserve">
+    <value>No dependencies</value>
   </data>
   <data name="WindowTitleFormat" xml:space="preserve">
     <value>Open Issue - {0}</value>
@@ -156,6 +180,9 @@
   <data name="IssueListDragDropDescription" xml:space="preserve">
     <value>Drag between rows to reorder, onto a different issue to reparent, into open space to move to the top level, or into Parents or Children in Issue Details to add a relationship. The row menu offers Move to top level, Duplicate issue, Edit in external editor, Reveal in File Explorer, and Delete issue.</value>
   </data>
+  <data name="IssueListDragDropDisabledDescription" xml:space="preserve">
+    <value>Switch to the Parent / child view to reorder issues or change relationships by dragging.</value>
+  </data>
   <data name="IssueListDragStartFormat" xml:space="preserve">
     <value>Dragging {0}. Drop on an issue to reparent, between rows to reorder, into open space to remove its parent links, or into Parents or Children to add a relationship.</value>
   </data>
@@ -182,6 +209,9 @@
   </data>
   <data name="IssueListEntryFormat" xml:space="preserve">
     <value>#{0} {1}</value>
+  </data>
+  <data name="IssueListMissingDependencyFormat" xml:space="preserve">
+    <value>Issue #{0} (not found)</value>
   </data>
   <data name="SearchBoxAutomationName" xml:space="preserve">
     <value>Search issues</value>

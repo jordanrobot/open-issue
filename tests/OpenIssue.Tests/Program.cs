@@ -45,6 +45,8 @@ var tests = new (string Name, Action Run)[]
     ("filter changes remove only excluded rows", ListFilterRemovesOnlyExcludedRows),
     ("list additions and reordering preserve surviving rows", ListReorderingPreservesRows),
     ("issue list rows form a parent and child tree", IssueListTreeRelationships),
+    ("issue list rows can be grouped by tags", IssueListTagGroups),
+    ("issue list rows can be grouped by dependencies", IssueListDependencyGroups),
     ("issue list indentation follows visible tree depth", IssueListDepthFollowsVisibleTree),
     ("issue list reordering preserves the tree", IssueListReorderPreservesTree),
     ("empty list results remove rows without a reset", ListEmptyResultsWithoutReset),
@@ -1148,6 +1150,76 @@ static void IssueListTreeRelationships()
     rows.Synchronize([first, second]);
     Equal(1, rows.RootItems.Count);
     Equal(1, rows.RootItems[0].Children.Count);
+}
+
+static void IssueListTagGroups()
+{
+    var first = ListIssue(1, "First", "#docs");
+    first.Tags = ["Docs", "UI"];
+    var second = ListIssue(2, "Second");
+    second.Tags = ["docs"];
+    var untagged = ListIssue(3, "Untagged");
+    var rows = new IssueListCollection();
+    rows.Synchronize([first, second, untagged]);
+
+    rows.SetViewMode(IssueListViewMode.Tags);
+
+    var docs = rows.RootNodes.Single(node =>
+        node.GroupKind == IssueListGroupKind.Tag &&
+        node.Title == "Docs");
+    var ui = rows.RootNodes.Single(node =>
+        node.GroupKind == IssueListGroupKind.Tag &&
+        node.Title == "UI");
+    var noTags = rows.RootNodes.Single(node =>
+        node.GroupKind == IssueListGroupKind.NoTags);
+    True(docs.Children.Select(node => node.Row?.Id).SequenceEqual(new long?[] { 1, 2 }),
+        "case-insensitive duplicate tags were not combined");
+    True(ui.Children.Select(node => node.Row?.Id).SequenceEqual(new long?[] { 1 }),
+        "an issue with multiple tags did not appear in each group");
+    True(noTags.Children.Select(node => node.Row?.Id).SequenceEqual(new long?[] { 3 }),
+        "an issue without tags was not kept visible");
+
+    var firstNode = rows.FindNode(first.Id);
+    rows.SetViewMode(IssueListViewMode.Relationships);
+    True(ReferenceEquals(firstNode, rows.FindNode(first.Id)),
+        "changing views replaced a surviving issue node");
+    True(rows.RootNodes.All(node => node.Row is not null),
+        "the relationship view did not reuse issue rows as its root nodes");
+}
+
+static void IssueListDependencyGroups()
+{
+    var prerequisite = ListIssue(1, "Prerequisite");
+    var firstDependent = ListIssue(2, "First dependent", "Depends on #1");
+    var secondDependent = ListIssue(3, "Second dependent", "Depends on #1\nDepends on #2");
+    var independent = ListIssue(4, "Independent");
+    var rows = new IssueListCollection();
+    rows.Synchronize(
+        [prerequisite, firstDependent, secondDependent, independent],
+        [prerequisite, firstDependent, secondDependent, independent]);
+
+    rows.SetViewMode(IssueListViewMode.Dependencies);
+
+    var prerequisiteGroup = rows.RootNodes.Single(node =>
+        node.GroupKind == IssueListGroupKind.Dependency &&
+        node.GroupIssueId == prerequisite.Id);
+    var dependentGroup = rows.RootNodes.Single(node =>
+        node.GroupKind == IssueListGroupKind.Dependency &&
+        node.GroupIssueId == firstDependent.Id);
+    var noDependencies = rows.RootNodes.Single(node =>
+        node.GroupKind == IssueListGroupKind.NoDependencies);
+    True(prerequisiteGroup.Children.Select(node => node.Row?.Id).SequenceEqual(new long?[] { 2, 3 }),
+        "dependent issues were not grouped under their prerequisite");
+    True(dependentGroup.Children.Select(node => node.Row?.Id).SequenceEqual(new long?[] { 3 }),
+        "an issue with multiple prerequisites did not appear in each group");
+    True(noDependencies.Children.Select(node => node.Row?.Id).SequenceEqual(new long?[] { 1, 4 }),
+        "issues without dependencies were not kept visible");
+
+    rows.Synchronize([firstDependent], [prerequisite, firstDependent]);
+    var filteredPrerequisiteGroup = rows.RootNodes.Single(node =>
+        node.GroupKind == IssueListGroupKind.Dependency &&
+        node.GroupIssueId == prerequisite.Id);
+    Equal("Prerequisite", filteredPrerequisiteGroup.Title);
 }
 
 static void IssueListDepthFollowsVisibleTree()

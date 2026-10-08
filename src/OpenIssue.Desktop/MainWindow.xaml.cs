@@ -99,6 +99,18 @@ public sealed partial class MainWindow : Window
     public static Visibility NestedIssueVisibility(bool isNested) =>
         isNested ? Visibility.Visible : Visibility.Collapsed;
 
+    /// <summary>Shows group headings and hides issue-row content.</summary>
+    /// <param name="isGroup">Whether the tree node is a group heading.</param>
+    /// <returns>Visible for a group heading.</returns>
+    public static Visibility IssueListGroupHeaderVisibility(bool isGroup) =>
+        isGroup ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>Shows issue-row content and hides group headings.</summary>
+    /// <param name="isGroup">Whether the tree node is a group heading.</param>
+    /// <returns>Visible for an issue row.</returns>
+    public static Visibility IssueListRowVisibility(bool isGroup) =>
+        isGroup ? Visibility.Collapsed : Visibility.Visible;
+
     /// <summary>Shows the empty state when an issue has no links in a relationship group.</summary>
     /// <param name="hasRelationships">Whether the relationship group contains any links.</param>
     /// <returns>Visible when the group is empty.</returns>
@@ -522,7 +534,7 @@ public sealed partial class MainWindow : Window
 
         var issue = row.Issue;
         var previous = ViewModel.SelectedIssue;
-        var previousRow = ViewModel.SelectedIssueListItem;
+        var previousNode = ViewModel.SelectedIssueListNode;
         if (previous?.Id == issue.Id)
         {
             return;
@@ -532,13 +544,13 @@ public sealed partial class MainWindow : Window
             previous.Id != issue.Id &&
             !await ConfirmLeaveCurrentAsync())
         {
-            IssueList.SelectedItem = previousRow;
+            IssueList.SelectedItem = previousNode;
             return;
         }
 
         if (!await ViewModel.SelectIssueAsync(issue))
         {
-            IssueList.SelectedItem = previousRow;
+            IssueList.SelectedItem = previousNode;
         }
     }
 
@@ -563,6 +575,12 @@ public sealed partial class MainWindow : Window
 
     private void IssueList_DragItemsStarting(TreeView sender, TreeViewDragItemsStartingEventArgs e)
     {
+        if (!ViewModel.CanReorderIssueList)
+        {
+            e.Cancel = true;
+            return;
+        }
+
         var pointerPressedIssueId = _pointerPressedIssueId;
         var issue = pointerPressedIssueId is { } pressedIssueId
             ? ViewModel.Issues.FirstOrDefault(candidate => candidate.Id == pressedIssueId)
@@ -599,6 +617,12 @@ public sealed partial class MainWindow : Window
 
     private void IssueList_DragOver(object sender, DragEventArgs e)
     {
+        if (!ViewModel.CanReorderIssueList)
+        {
+            e.AcceptedOperation = DataPackageOperation.None;
+            return;
+        }
+
         if (!e.DataView.Contains(StandardDataFormats.Text))
         {
             return;
@@ -638,7 +662,8 @@ public sealed partial class MainWindow : Window
 
     private void IssueListItem_DragOver(object sender, DragEventArgs e)
     {
-        if (!e.DataView.Contains(StandardDataFormats.Text) ||
+        if (!ViewModel.CanReorderIssueList ||
+            !e.DataView.Contains(StandardDataFormats.Text) ||
             sender is not TreeViewItem container ||
             ResolveIssueListItem(container) is not { } target)
         {
@@ -746,7 +771,8 @@ public sealed partial class MainWindow : Window
         _relationshipDropHandled = false;
         ClearRelationshipDropTargetHighlight(ParentIssuesDropTarget);
         ClearRelationshipDropTargetHighlight(ChildIssuesDropTarget);
-        if (relationshipDropHandled ||
+        if (!ViewModel.CanReorderIssueList ||
+            relationshipDropHandled ||
             draggedIssueId is null ||
             e.DropResult != DataPackageOperation.Move)
         {
@@ -810,8 +836,9 @@ public sealed partial class MainWindow : Window
         {
             var next = current switch
             {
+                IssueListNode issueNode => issueNode.Row,
                 IssueListItem issue => issue,
-                TreeViewNode node => node.Content,
+                TreeViewNode treeNode => treeNode.Content,
                 FrameworkElement { DataContext: { } dataContext } => dataContext,
                 _ => null
             };
@@ -988,7 +1015,7 @@ public sealed partial class MainWindow : Window
 
     private async void DeleteIssueContextMenuItem_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: IssueListItem row })
+        if (sender is FrameworkElement { DataContext: IssueListNode { Row: { } row } })
         {
             await DeleteIssueAsync(row.Issue);
         }
@@ -996,7 +1023,7 @@ public sealed partial class MainWindow : Window
 
     private async void MoveIssueToRootContextMenuItem_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not FrameworkElement { DataContext: IssueListItem row } ||
+        if (sender is not FrameworkElement { DataContext: IssueListNode { Row: { } row } } ||
             !await ConfirmLeaveCurrentAsync())
         {
             return;
@@ -1015,7 +1042,7 @@ public sealed partial class MainWindow : Window
 
     private async void DuplicateIssueContextMenuItem_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not FrameworkElement { DataContext: IssueListItem row } ||
+        if (sender is not FrameworkElement { DataContext: IssueListNode { Row: { } row } } ||
             !await ConfirmLeaveCurrentAsync())
         {
             return;
@@ -1033,7 +1060,7 @@ public sealed partial class MainWindow : Window
 
     private async void EditIssueExternallyContextMenuItem_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not FrameworkElement { DataContext: IssueListItem row } ||
+        if (sender is not FrameworkElement { DataContext: IssueListNode { Row: { } row } } ||
             !await ConfirmLeaveCurrentAsync())
         {
             return;
@@ -1052,7 +1079,7 @@ public sealed partial class MainWindow : Window
 
     private async void RevealIssueInExplorerContextMenuItem_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not FrameworkElement { DataContext: IssueListItem row })
+        if (sender is not FrameworkElement { DataContext: IssueListNode { Row: { } row } })
         {
             return;
         }
@@ -1124,7 +1151,7 @@ public sealed partial class MainWindow : Window
                     return;
                 }
 
-                IssueList.SelectedItem = target;
+                IssueList.SelectedItem = ViewModel.Issues.FindNode(target.Id);
             }
 
             if (addingParents)
@@ -1180,7 +1207,7 @@ public sealed partial class MainWindow : Window
         }
 
         ViewModel.ExpandIssueAncestors(issueId);
-        IssueList.SelectedItem = row;
+        IssueList.SelectedItem = ViewModel.Issues.FindNode(issueId);
     }
 
     private async void RemoveParentRelationshipButton_Click(object sender, RoutedEventArgs e) =>
