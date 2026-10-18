@@ -1,6 +1,8 @@
 using OpenIssue.Core;
+using OpenIssue.Cli;
 using OpenIssue.Desktop;
 using System.Collections.Specialized;
+using System.Text.Json;
 
 var tests = new (string Name, Action Run)[]
 {
@@ -50,7 +52,13 @@ var tests = new (string Name, Action Run)[]
     ("issue list indentation follows visible tree depth", IssueListDepthFollowsVisibleTree),
     ("issue list reordering preserves the tree", IssueListReorderPreservesTree),
     ("empty list results remove rows without a reset", ListEmptyResultsWithoutReset),
-    ("list row identity cannot be changed", ListRowIdentity)
+    ("list row identity cannot be changed", ListRowIdentity),
+    ("agent skill sync detects every installed harness and installs manifest skills in each", AgentSkillsSyncCopiesManifestSkills),
+    ("agent skill sync updates all detected harnesses and removes stale entries", AgentSkillsSyncReplacesUpdatedSkills),
+    ("agent skill sync does not install when no harness is detected", AgentSkillsSyncWithoutDetectedHarnesses),
+    ("agent skill sync detects Codex from its shared skills directory", AgentSkillsSyncDetectsCodexSkillsDirectory),
+    ("agent skill uninstall removes managed installations from every detected harness", AgentSkillsUninstallRemovesManagedInstallations),
+    ("agent skill manifest rejects paths outside the package", AgentSkillsRejectsUnsafeManifestPaths),
 };
 
 var failed = 0;
@@ -1284,6 +1292,217 @@ static void ListRowIdentity()
     Throws<ArgumentException>(() => row.Update(ListIssue(2, "Second")));
     Equal(1L, row.Id);
     Equal("First", row.Title);
+}
+
+static void AgentSkillsSyncCopiesManifestSkills()
+{
+    using var project = new TemporaryProject();
+    var packageSkillsDirectory = Path.Combine(project.Root, "package", "skills");
+    var userProfileDirectory = Path.Combine(project.Root, "profile");
+    var stateDirectory = Path.Combine(project.Root, "state");
+    CreateSkillPackage(
+        packageSkillsDirectory,
+        ("implement-issue", "Implement issues."),
+        ("issue-triage", "Triage issues."));
+    foreach (var harnessDirectory in new[] { ".copilot", ".codex", ".claude" })
+    {
+        Directory.CreateDirectory(Path.Combine(userProfileDirectory, harnessDirectory));
+    }
+
+    var manager = new AgentSkillManager(packageSkillsDirectory, stateDirectory, userProfileDirectory);
+
+    var detectedHarnesses = manager.SynchronizeDetected();
+    True(
+        detectedHarnesses.ToHashSet().SetEquals([AgentHarness.Copilot, AgentHarness.Codex, AgentHarness.Claude]),
+        "The detected harnesses did not match the harnesses installed in the profile.");
+
+    foreach (var skill in new[] { ("implement-issue", "Implement issues."), ("issue-triage", "Triage issues.") })
+    {
+        Equal(
+            skill.Item2,
+            File.ReadAllText(Path.Combine(userProfileDirectory, ".copilot", "skills", skill.Item1, "SKILL.md")));
+        Equal(
+            skill.Item2,
+            File.ReadAllText(Path.Combine(userProfileDirectory, ".agents", "skills", skill.Item1, "SKILL.md")));
+        Equal(
+            skill.Item2,
+            File.ReadAllText(Path.Combine(userProfileDirectory, ".claude", "skills", skill.Item1, "SKILL.md")));
+    }
+}
+
+static void AgentSkillsSyncReplacesUpdatedSkills()
+{
+    using var project = new TemporaryProject();
+    var packageSkillsDirectory = Path.Combine(project.Root, "package", "skills");
+    var userProfileDirectory = Path.Combine(project.Root, "profile");
+    var stateDirectory = Path.Combine(project.Root, "state");
+    CreateSkillPackage(
+        packageSkillsDirectory,
+        ("implement-issue", "Version one."),
+        ("obsolete-skill", "Remove me on update."));
+    Directory.CreateDirectory(Path.Combine(userProfileDirectory, ".copilot"));
+    var manager = new AgentSkillManager(packageSkillsDirectory, stateDirectory, userProfileDirectory);
+    manager.SynchronizeDetected();
+
+    Directory.CreateDirectory(Path.Combine(userProfileDirectory, ".codex"));
+    CreateSkillPackage(packageSkillsDirectory, ("implement-issue", "Version two."));
+    var detectedHarnesses = manager.SynchronizeDetected();
+    True(
+        detectedHarnesses.ToHashSet().SetEquals([AgentHarness.Copilot, AgentHarness.Codex]),
+        "Sync did not add a harness that was detected after the initial installation.");
+
+    foreach (var harnessSkillsDirectory in new[]
+             {
+                 Path.Combine(userProfileDirectory, ".copilot", "skills"),
+                 Path.Combine(userProfileDirectory, ".agents", "skills")
+             })
+    {
+        Equal("Version two.", File.ReadAllText(Path.Combine(harnessSkillsDirectory, "implement-issue", "SKILL.md")));
+        True(!Directory.Exists(Path.Combine(harnessSkillsDirectory, "obsolete-skill")),
+            "A stale managed skill was not removed.");
+    }
+
+    Directory.Delete(Path.Combine(userProfileDirectory, ".codex"), recursive: true);
+    Directory.Delete(Path.Combine(userProfileDirectory, ".agents", "skills"), recursive: true);
+    var remainingHarnesses = manager.SynchronizeDetected();
+    True(
+        remainingHarnesses.SequenceEqual([AgentHarness.Copilot]),
+        "Sync did not stop managing a harness that was no longer detected.");
+    using var persistedState = JsonDocument.Parse(File.ReadAllText(Path.Combine(stateDirectory, "agent-skills.json")));
+    var trackedHarnesses = persistedState.RootElement
+        .GetProperty("installations")
+        .EnumerateArray()
+        .Select(installation => installation.GetProperty("harness").GetString())
+        .Distinct(StringComparer.Ordinal)
+        .ToHashSet(StringComparer.Ordinal);
+    True(
+        trackedHarnesses.SetEquals(["copilot"]),
+        "The saved installation state still includes a harness that was no longer detected.");
+}
+
+static void AgentSkillsSyncWithoutDetectedHarnesses()
+{
+    using var project = new TemporaryProject();
+    var packageSkillsDirectory = Path.Combine(project.Root, "package", "skills");
+    var userProfileDirectory = Path.Combine(project.Root, "profile");
+    var stateDirectory = Path.Combine(project.Root, "state");
+    CreateSkillPackage(packageSkillsDirectory, ("implement-issue", "No install expected."));
+    Directory.CreateDirectory(Path.Combine(userProfileDirectory, ".copilot"));
+    var manager = new AgentSkillManager(packageSkillsDirectory, stateDirectory, userProfileDirectory);
+
+    Equal(1, manager.SynchronizeDetected().Count);
+    Directory.Delete(Path.Combine(userProfileDirectory, ".copilot"), recursive: true);
+    Equal(0, manager.SynchronizeDetected().Count);
+
+    True(!Directory.Exists(Path.Combine(userProfileDirectory, ".copilot")),
+        "A skill installation remained after its harness was no longer detected.");
+    True(!Directory.Exists(Path.Combine(userProfileDirectory, ".agents", "skills")),
+        "Sync created Codex skills when no Codex harness was detected.");
+    True(!Directory.Exists(Path.Combine(userProfileDirectory, ".claude")),
+        "Sync created Claude Code skills when no Claude Code harness was detected.");
+    True(!File.Exists(Path.Combine(stateDirectory, "agent-skills.json")),
+        "Sync retained managed-installation state when no harness was detected.");
+}
+
+static void AgentSkillsSyncDetectsCodexSkillsDirectory()
+{
+    using var project = new TemporaryProject();
+    var packageSkillsDirectory = Path.Combine(project.Root, "package", "skills");
+    var userProfileDirectory = Path.Combine(project.Root, "profile");
+    var stateDirectory = Path.Combine(project.Root, "state");
+    CreateSkillPackage(packageSkillsDirectory, ("implement-issue", "Codex detected from skills root."));
+    var codexSkillsDirectory = Path.Combine(userProfileDirectory, ".agents", "skills");
+    Directory.CreateDirectory(codexSkillsDirectory);
+    var manager = new AgentSkillManager(packageSkillsDirectory, stateDirectory, userProfileDirectory);
+
+    var detectedHarnesses = manager.SynchronizeDetected();
+
+    True(
+        detectedHarnesses.SequenceEqual([AgentHarness.Codex]),
+        "The existing Codex global skills directory did not detect Codex.");
+    Equal(
+        "Codex detected from skills root.",
+        File.ReadAllText(Path.Combine(codexSkillsDirectory, "implement-issue", "SKILL.md")));
+}
+
+static void AgentSkillsUninstallRemovesManagedInstallations()
+{
+    using var project = new TemporaryProject();
+    var packageSkillsDirectory = Path.Combine(project.Root, "package", "skills");
+    var userProfileDirectory = Path.Combine(project.Root, "profile");
+    var stateDirectory = Path.Combine(project.Root, "state");
+    CreateSkillPackage(packageSkillsDirectory, ("implement-issue", "Managed copy."));
+    foreach (var harnessDirectory in new[] { ".copilot", ".codex", ".claude" })
+    {
+        Directory.CreateDirectory(Path.Combine(userProfileDirectory, harnessDirectory));
+    }
+
+    var manager = new AgentSkillManager(packageSkillsDirectory, stateDirectory, userProfileDirectory);
+    var detectedHarnesses = manager.SynchronizeDetected();
+    True(
+        detectedHarnesses.ToHashSet().SetEquals([AgentHarness.Copilot, AgentHarness.Codex, AgentHarness.Claude]),
+        "The uninstall setup did not detect every harness.");
+
+    var codexSkillsDirectory = Path.Combine(userProfileDirectory, ".agents", "skills");
+    var manualSkillDirectory = Path.Combine(codexSkillsDirectory, "manual-skill");
+    Directory.CreateDirectory(manualSkillDirectory);
+    File.WriteAllText(Path.Combine(manualSkillDirectory, "SKILL.md"), "Keep me.");
+    Directory.Delete(Path.Combine(userProfileDirectory, ".claude"), recursive: true);
+
+    True(manager.Uninstall(), "Uninstall did not report the managed skill installation.");
+    foreach (var harnessSkillsDirectory in new[]
+             {
+                 Path.Combine(userProfileDirectory, ".copilot", "skills"),
+                 codexSkillsDirectory,
+                 Path.Combine(userProfileDirectory, ".claude", "skills")
+             })
+    {
+        True(!Directory.Exists(Path.Combine(harnessSkillsDirectory, "implement-issue")),
+            $"The managed skill was not removed from '{harnessSkillsDirectory}'.");
+    }
+
+    True(Directory.Exists(manualSkillDirectory), "An unrelated skill was removed.");
+    True(!File.Exists(Path.Combine(stateDirectory, "agent-skills.json")), "The saved installation state was not removed.");
+    True(!manager.Uninstall(), "Uninstall was not idempotent.");
+}
+
+static void AgentSkillsRejectsUnsafeManifestPaths()
+{
+    using var project = new TemporaryProject();
+    var packageSkillsDirectory = Path.Combine(project.Root, "package", "skills");
+    var userProfileDirectory = Path.Combine(project.Root, "profile");
+    var stateDirectory = Path.Combine(project.Root, "state");
+    CreateSkillPackage(packageSkillsDirectory, ("implement-issue", "Packaged content."));
+    Directory.CreateDirectory(Path.Combine(userProfileDirectory, ".copilot"));
+    File.WriteAllText(
+        Path.Combine(packageSkillsDirectory, "manifest.json"),
+        """{"skills":[{"name":"implement-issue","directory":"../outside"}]}""");
+    var manager = new AgentSkillManager(packageSkillsDirectory, stateDirectory, userProfileDirectory);
+
+    Throws<IssueException>(() => manager.SynchronizeDetected());
+
+    True(
+        !Directory.Exists(Path.Combine(userProfileDirectory, ".copilot", "skills")),
+        "An unsafe manifest changed the user's skill directory.");
+}
+
+static void CreateSkillPackage(string packageSkillsDirectory, params (string Name, string Content)[] skills)
+{
+    Directory.CreateDirectory(packageSkillsDirectory);
+    foreach (var skill in skills)
+    {
+        var skillDirectory = Path.Combine(packageSkillsDirectory, skill.Name);
+        Directory.CreateDirectory(skillDirectory);
+        File.WriteAllText(Path.Combine(skillDirectory, "SKILL.md"), skill.Content);
+    }
+
+    var manifest = new
+    {
+        skills = skills.Select(skill => new { name = skill.Name, directory = skill.Name })
+    };
+    File.WriteAllText(
+        Path.Combine(packageSkillsDirectory, "manifest.json"),
+        JsonSerializer.Serialize(manifest));
 }
 
 static void True(bool condition, string message)

@@ -29,6 +29,12 @@
 
   <ItemGroup>
     <None Include="../../README.md" Pack="true" PackagePath="/" />
+    <None Update="skills/manifest.json"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../.github/skills/implement-issue/**/*">
+      <Link>skills/implement-issue/%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
   <PropertyGroup>

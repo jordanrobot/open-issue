@@ -10,15 +10,19 @@ Requires the .NET 10 runtime. Install the CLI as a .NET global tool:
 dotnet tool install --global OpenIssue.Tool
 ```
 
-The installed command is `issue`. Update it with `dotnet tool update --global OpenIssue.Tool`. On Windows, `issue ui` launches the bundled WinUI 3 app with `winapp run`; the UI requires the Windows App SDK CLI (`winapp`), the .NET 10 Desktop Runtime, and Windows App Runtime.
+The installed command is `issue`. On Windows, `issue ui` launches the bundled WinUI 3 app with `winapp run`; the UI requires the Windows App SDK CLI (`winapp`), the .NET 10 Desktop Runtime, and Windows App Runtime.
+
+The tool package includes the managed agent skills. Run `issue skills sync` after a direct tool install or update; it detects and synchronizes every supported harness found in the user profile: GitHub Copilot (`~/.copilot`), Codex (`~/.codex` or `~/.agents/skills`), and Claude Code (`~/.claude`). If none is detected, the command succeeds without installing skills or prompting. Subsequent syncs update all detected harnesses and remove previously managed copies for harnesses that are no longer detected. `issue skills uninstall` removes all tracked managed copies, including those for harnesses that are no longer detected.
+
+.NET global tools do not run install, update, or uninstall hooks. Use `.\scripts\install.ps1` or `.\scripts\build-install.ps1` to build and install this checkout, `.\scripts\update.ps1` to update the global tool and its skills together, and `.\scripts\uninstall.ps1` to remove managed skills before uninstalling the tool. If using `dotnet tool uninstall` directly, run `issue skills uninstall` first.
 
 To install the package built from this checkout:
 
 ```powershell
-.\scripts\build-install.ps1
+.\scripts\install.ps1
 ```
 
-This packs the CLI and Windows desktop application to `artifacts/packages`, then installs the tool globally as `issue`. Pack the tool on Windows. To pack and install manually:
+`install.ps1` builds and packs the current CLI and Windows desktop application to `artifacts/packages` before installing the tool globally as `issue`, so it does not install a stale local package. `build-install.ps1` remains as an alias. The install and update scripts synchronize every detected harness automatically. Pack the tool on Windows. To pack and install manually:
 
 ```powershell
 dotnet pack src/OpenIssue.Cli/OpenIssue.Cli.csproj -c Release -o artifacts/packages
@@ -26,6 +30,12 @@ dotnet tool install --global --configfile scripts/NuGet.Config OpenIssue.Tool --
 ```
 
 NuGet rejects `--add-source` when package source mapping is enabled. The supplied config maps `OpenIssue.Tool` to the local package feed, so you do not need to change your user-wide NuGet configuration.
+
+To remove the global tool installation:
+
+```powershell
+.\scripts\uninstall.ps1
+```
 
 ## Initialize and use
 
@@ -69,7 +79,7 @@ PowerShell helpers are also available from the repository root:
 .\scripts\build-install.ps1
 ```
 
-`install.ps1` installs or replaces the global tool using the locally packed package; `uninstall.ps1` removes it.
+`install.ps1` and `build-install.ps1` build and pack the current checkout before installing or replacing the global tool; `uninstall.ps1` removes it.
 
 The CLI and core target portable .NET 10. The Windows desktop app uses WinUI 3 and the Windows App SDK. Build or package it with `src/OpenIssue.Desktop/OpenIssue.Desktop.csproj`; the desktop UI shares the core and storage contract with the CLI. The desktop UI defaults to System and offers Light, Dark, and Dracula, with the selection saved per user.
 

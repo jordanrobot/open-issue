@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using OpenIssue.Cli;
 using OpenIssue.Core;
 using System.CommandLine;
 
@@ -36,6 +37,29 @@ internal static class Cli
         var ui = new Command("ui", "Open the Windows desktop application.");
         ui.SetAction(_ => Run(LaunchDesktopUi, json: false));
         root.Add(ui);
+
+        var skills = new Command("skills", "Manage agent skills in detected personal harness directories.");
+        var syncSkills = new Command("sync", "Install or update managed agent skills for detected harnesses.");
+        syncSkills.SetAction(_ => Run(SynchronizeAgentSkills, json: false));
+        skills.Add(syncSkills);
+
+        var uninstallSkills = new Command("uninstall", "Remove the managed agent skills.");
+        uninstallSkills.SetAction(_ => Run(() =>
+        {
+            var manager = AgentSkillManager.CreateForCurrentUser();
+            if (manager.Uninstall())
+            {
+                Console.WriteLine("Removed the managed agent skills.");
+            }
+            else
+            {
+                Console.WriteLine("No Open Issue-managed agent skills are installed.");
+            }
+
+            return 0;
+        }, json: false));
+        skills.Add(uninstallSkills);
+        root.Add(skills);
 
         var title = new Option<string?>("--title") { Description = "Issue title." };
         var body = new Option<string?>("--body") { Description = "Issue body as Markdown text." };
@@ -235,6 +259,8 @@ internal static class Cli
                 Commands:
                   issue init [DIRECTORY]
                   issue ui
+                  issue skills sync
+                  issue skills uninstall
                   issue new --title TITLE (--body TEXT | --body-file FILE)
                   issue list [--status VALUE] [--tag TAG] [--priority VALUE] [--ready true|false] [--json]
                   issue show ID [--json]
@@ -357,6 +383,21 @@ internal static class Cli
     }
 
     private static IssueService GetService() => new(new IssueRepository(ProjectLocator.Find()));
+
+    private static int SynchronizeAgentSkills()
+    {
+        var manager = AgentSkillManager.CreateForCurrentUser();
+        var harnesses = manager.SynchronizeDetected();
+        if (harnesses.Count == 0)
+        {
+            Console.WriteLine("No supported agent harnesses were detected. No managed agent skills were installed.");
+            return 0;
+        }
+
+        Console.WriteLine(
+            $"Synchronized managed agent skills for {string.Join(", ", harnesses.Select(AgentSkillManager.GetHarnessName))}.");
+        return 0;
+    }
 
     private static int LaunchDesktopUi()
     {
